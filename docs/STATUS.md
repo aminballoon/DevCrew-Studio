@@ -62,6 +62,29 @@
 - Tests: 20 (validator rules, a security step that sends work back once, the minimal pipeline).
 - Not yet: the fake demo agent only has scripts for the built-in roles and `security`, so other new roles write nothing in demo runs. Diagrams of long pipelines get crowded. Gate ids changed from `spec`/`merge` to the step ids (`gate_spec`/`gate_merge`); old runs still display correctly.
 
+## Latest changes (2026-10-12, first real runs of the three presets)
+Run with the CLI, profile `claude`, `--auto`, on small projects (requirements and seeds were kept in the session scratchpad, not in the repo). Costs are API-price equivalents reported by the agents; the account is Claude Pro.
+
+| Preset | Project | Result | Tokens | Cost |
+|---|---|---|---|---|
+| system-integration | Classroom air-quality monitor | ✅ 16 blocks with real parts, Codex review with 2 high findings (display power vs 3.3 V rail; landed cost vs budget) | 3.5M | $4.20 (scout $3.48) |
+| existing-code | Small inventory library (git repo, worktree mode) | ✅ analyst found the planted bugs (negative `remove`), 3 parts first try, 140/140 tests, branch `devcrew/<runId>` in the project repo | 2.5M | $3.63 |
+| firmware-board | NUCLEO-F446RE skeleton (.ioc, Unity, Makefile, no board) | ⏸ 4 parts pass (87/87 Unity tests, all checks incl. HIL smoke reporting no board). Claude session limit hit in the Firmware reviewer; resumes after the reset | 7.9M | $10.74 so far (QA $4.58) |
+
+Found and fixed during the runs:
+- **Verify:** `make test` writes test binaries next to the Unity sources in `tests/`; Verify called them changed locked files, so Dev could never pass. Locked files are now the ones QA handed over (unchanged and present); new files there can only come from the test command, since the scope guard reverts files agents add.
+- **Resume:** `npm run run -- resume <runId>` continues a run whose process stopped (crash, killed, quota) from the last finished step. Used for real on the firmware run.
+- **System diagram** with a real 16-block design: columns now follow data and control links only, wider gaps, short labels with the full text on hover, legend toggles link types.
+- ACP extension notifications (`_auth/status_update`) are ignored instead of flooding the log.
+- Planner used the new features well: `testFormats: ["unity"]`, HIL as a separate check so a missing board does not block, a check that `App/` has no HAL calls.
+
+Seen, not fixed yet:
+- One Claude Pro session limit covers roughly two to three such runs. QA and the hardware scout are the expensive roles.
+- Codex reports tokens but no cost (`$0.000`).
+- `--auto` runs emit no gate payloads, so the dashboard cannot show their system diagram or reports at a gate.
+- The guard reports test binaries a reviewer's `make test` creates as blocked files (they are build output; harmless, but noisy).
+- Advisory roles that say `VERDICT: changes` (the Reviewer in existing-code, the architecture reviewer in system-integration) do not stop `--auto`; in a normal run you see them at the last gate.
+
 ## Latest changes (2026-10-12, git repo, test formats)
 - The project is a git repository, pushed to https://github.com/aminballoon/DevCrew-Studio (`main`).
 - **Verify reads many test tools** (`src/guard/testFormats.ts`): node:test, jest, vitest, pytest, cargo test, ctest, GoogleTest, Unity, `go test -v`, any TAP output, and firmware `HIL:PASS / HIL:FAIL / HIL:DONE` lines (a run that never prints `HIL:DONE` counts as a failure). `plan.json` may list `testFormats`; otherwise the first format found is used. Output with no recognisable results fails with a clear reason.
@@ -159,7 +182,7 @@
 
 ### Pipeline
 - [ ] Quota-aware scheduling: เช็คโควต้าก่อนเริ่มแต่ละขั้น, พักรอเมื่อหมด แล้วทำต่อเอง (reuse `ClaudeUsageProbe` และ `CodexRateLimits` จาก vscode-acp)
-- [ ] Resume run ที่ค้างสถานะ running เพราะ server ดับระหว่างที่ agent ทำงาน (ตอนนี้ resume ได้เฉพาะตอนรอที่ Gate)
+- [x] Resume run ที่ค้างกลางทาง: `npm run run -- resume <runId>` (ยังไม่มีปุ่มใน dashboard)
 - [ ] ทดสอบโหมด git worktree กับ repo จริง และการ merge branch `devcrew/<runId>`
 - [ ] แสดงโควต้าสดของแต่ละ vendor บน dashboard
 - [ ] เปิดและทดสอบ LangGraph Studio จริง
@@ -167,7 +190,7 @@
 - [x] รองรับภาษาอื่นนอกจาก Node/TS ใน Verify (ดู Latest changes: test formats)
 
 ### Presets ใหม่ (existing-code, firmware-board, system-integration)
-- [ ] รันทั้ง 3 preset กับ agent จริง (ตอนนี้ทดสอบแค่กับ demo agent)
+- [x] รันทั้ง 3 preset กับ agent จริง (firmware รอ Firmware reviewer หลังโควต้ารีเซ็ต)
 - [ ] firmware-board: ทดสอบ HIL rig กับบอร์ดจริง (flash, serial, lock, SSH) ยังไม่เคยรันกับ hardware
 - [ ] เช็คว่า Codex ผ่าน `codex-acp` ค้นเว็บได้ไหม ถ้าได้ เพิ่ม `web` ใน `provides`
 - [ ] ส่งต่อจาก design pipeline ไป build pipeline (ใช้ branch ของ design เป็น source) ตอนนี้ต้องทำเอง
