@@ -2,6 +2,13 @@
 
 อัปเดตล่าสุด: 2026-10-12
 
+## Latest changes (2026-10-13, benchmark harness fixes found on L-04)
+- **Grading:** L-04's perf probe sat with the hidden tests, so it counted as a 17th declared test while only 16 run; no L-04 run could be resolved. The probe now lives in `hidden/perf/` and is copied only for the perf command. Grading clears `hidden-tests/` first.
+- **Perf parsing:** cargo prints `test perf ... ` on the same line as the probe's output; the runner now finds `PERF {json}` anywhere in a line. v1 perf results read as `runs: 0` because of this.
+- **Single-agent time:** the single agent does the whole task in one turn but was cut off by the 30-min per-turn limit, not the task's limit (120 min on L-04). Single arms now get the task's time limit for that turn.
+- **Tokens on timeout:** a turn that timed out recorded 0 tokens; it now records what the agent used until then.
+- `npm run bench -- ... --regrade` grades saved results again from their workspaces without running agents. Regrading v1 L-04 arm A gave 16/16 resolved with p50 91 µs, p99 216 µs, ~4,900 frames/s (that run is still invalid: wrong test-tool prompt and the 30-min cut).
+
 ## Latest changes (2026-10-12, v3: roles with specialist skills; branch `pipeline-role-skills`)
 Built on v2. Each role gets know-how and tools a plain prompt does not give it, so "different skills per role" can be measured.
 - The built-in Planner, QA and build steps can take a role guide on top of DevCrew's instructions (`"guide": "guide:<name>"`); validated, recorded at approval like other guides, shown in the plain-words description.

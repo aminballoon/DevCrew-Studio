@@ -117,6 +117,13 @@ export class AgentSession {
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
         void this.connection.cancel({ sessionId: this.sessionId }).catch(() => {});
+        // What the turn used so far still counts; agents that only report usage at the end lose it otherwise
+        if (this.turnStepTokens) {
+          this.emit({
+            type: 'usage', role: this.opts.role, agent: this.opts.agentName, contextUsed: this.context.used, contextSize: this.context.size,
+            inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cachedWriteTokens: 0, totalTokens: this.turnStepTokens, costUsd: Math.max(0, this.lastCost - costBefore),
+          });
+        }
         reject(new Error(`Turn timed out after ${Math.round(this.opts.turnTimeoutMs / 60000)} min`));
       }, this.opts.turnTimeoutMs);
     });

@@ -4,5 +4,5 @@
   "title": "Rust telemetry bridge over Zenoh (with performance probe)",
   "timeLimitMinutes": 120,
   "gradeCommand": "mkdir -p tests && cp hidden-tests/hidden_*.rs tests/ && cargo test --release --test hidden_frames --test hidden_bridge",
-  "perfCommand": "cargo test --release --test hidden_perf -- --ignored --nocapture --test-threads=1"
+  "perfCommand": "mkdir -p tests && cp hidden-perf/hidden_perf.rs tests/ && cargo test --release --test hidden_perf -- --ignored --nocapture --test-threads=1"
 }

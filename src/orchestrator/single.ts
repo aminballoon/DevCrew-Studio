@@ -14,6 +14,8 @@ export interface SingleRunOptions {
   guides?: string;
   label?: string;
   runId?: string;
+  /** The one agent does the whole task in one turn, so it needs the task's time limit, not the per-turn one. */
+  turnTimeoutMs?: number;
 }
 
 /**
@@ -26,7 +28,7 @@ export async function runSingle(opts: SingleRunOptions): Promise<{ runId: string
   const ws = prepareWorkspace(opts.source, runId);
   bus.emit(runId, { type: 'run_started', requirement: opts.requirement, workspace: ws.path, mode: 'single', profile: opts.profile, label: opts.label });
   const to = [opts.process ? 'Verify' : 'End of run'];
-  const ctx = { runId, profile: opts.profile, workspace: ws.path, role: 'single' as const, io: { from: ['You: the task'], reads: [], to } };
+  const ctx = { runId, profile: opts.profile, workspace: ws.path, role: 'single' as const, io: { from: ['You: the task'], reads: [], to }, turnTimeoutMs: opts.turnTimeoutMs };
   try {
     bus.emit(runId, { type: 'node_started', node: 'single', attempt: 1 });
     await agentTurn(ctx, singlePrompt(opts.requirement, opts.process, opts.guides));

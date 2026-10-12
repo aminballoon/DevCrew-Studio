@@ -31,6 +31,8 @@ export interface TurnContext {
   /** For pipeline-defined roles: what it may write, and which agent runs it. */
   scope?: Scope;
   agentName?: string;
+  /** Overrides the config's per-turn limit, e.g. a single agent that does the whole task in one turn. */
+  turnTimeoutMs?: number;
 }
 
 /** The agent for a role: the step's own choice, the profile's mapping, or the profile's reviewer. */
@@ -92,7 +94,7 @@ export async function agentTurn(ctx: TurnContext, prompt: string): Promise<TurnR
     const { name, spec } = agentForTurn(cfg, ctx);
     session = await AgentSession.start({
       runId: ctx.runId, role: ctx.role, agentName: name, spec, workspace: ctx.workspace,
-      scope: scopeOf(ctx), bus: getBus(), turnTimeoutMs: cfg.turnTimeoutMinutes * 60_000,
+      scope: scopeOf(ctx), bus: getBus(), turnTimeoutMs: ctx.turnTimeoutMs ?? cfg.turnTimeoutMinutes * 60_000,
     });
     sessions.set(id, session);
   }

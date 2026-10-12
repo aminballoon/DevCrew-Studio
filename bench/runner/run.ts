@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -30,7 +30,8 @@ const BENCH = join(STUDIO_ROOT, 'bench');
 const USAGE = `Usage: npm run bench -- --tasks <id,...|all> --arms <id,...> [--reps N] [--profile name] [--suite name]
 
   --profile  override every arm's agent profile (e.g. "fake" to test the harness for free)
-  --suite    results folder under bench/results (default: date + profile)`;
+  --suite    results folder under bench/results (default: date + profile)
+  --regrade  grade saved results again from their workspaces (after a grading fix); agents do not run`;
 
 const { values } = parseArgs({
   options: {
@@ -39,6 +40,7 @@ const { values } = parseArgs({
     reps: { type: 'string', default: '1' },
     profile: { type: 'string' },
     suite: { type: 'string' },
+    regrade: { type: 'boolean', default: false },
     help: { type: 'boolean', default: false },
   },
 });
@@ -62,6 +64,8 @@ const sha = (s: string) => createHash('sha256').update(s).digest('hex').slice(0,
 /** Copy the hidden tests in only now, run them, and judge. */
 async function grade(task: Task, workspace: string) {
   const hiddenSrc = join(BENCH, 'tasks', task.id, 'hidden', 'tests');
+  // Start clean: a regrade must not count files an earlier grading left behind
+  rmSync(join(workspace, 'hidden-tests'), { recursive: true, force: true });
   cpSync(hiddenSrc, join(workspace, 'hidden-tests'), { recursive: true });
   const declared = countDeclaredTests(workspace, 'hidden-tests/');
   const run = await runCommand(task.gradeCommand, workspace, 5 * 60_000);
@@ -78,11 +82,15 @@ async function grade(task: Task, workspace: string) {
 /** Run the task's performance probe 3 times and keep the median of each number. */
 async function perf(task: Task, workspace: string) {
   if (!task.perfCommand) { return undefined; }
+  // The probe lives apart from the graded tests, so it never counts as a hidden test
+  const perfSrc = join(BENCH, 'tasks', task.id, 'hidden', 'perf');
+  if (existsSync(perfSrc)) { cpSync(perfSrc, join(workspace, 'hidden-perf'), { recursive: true }); }
   const runs: Record<string, Record<string, number>>[] = [];
   for (let i = 0; i < 3; i++) {
     const out = (await runCommand(task.perfCommand, workspace, 5 * 60_000)).output;
-    const line = out.split('\n').find(l => l.startsWith('PERF '));
-    if (line) { try { runs.push(JSON.parse(line.slice(5))); } catch { /* unreadable run is skipped */ } }
+    // Test harnesses print "test perf ... " on the same line before the probe's own output
+    const json = out.match(/PERF (\{.*\})/)?.[1];
+    if (json) { try { runs.push(JSON.parse(json)); } catch { /* unreadable run is skipped */ } }
   }
   if (!runs.length) { return { runs: 0 }; }
   const median = (xs: number[]) => xs.sort((a, b) => a - b)[Math.floor(xs.length / 2)];
@@ -137,6 +145,24 @@ function savedAndValid(file: string): boolean {
   if (r.quotaLimited) { return false; }
   return r.resolved || !r.runId || !quotaHit(getBus().read(r.runId));
 }
+if (values.regrade) {
+  for (const { task, arm, rep } of matrix) {
+    const file = join(outDir, `${task.id}__${arm.id}__r${rep}.json`);
+    if (!existsSync(file)) { continue; }
+    const r = JSON.parse(readFileSync(file, 'utf8'));
+    const started = getBus().read(r.runId).find(e => e.type === 'run_started');
+    const workspace = started?.type === 'run_started' ? started.workspace : '';
+    if (!workspace || !existsSync(workspace)) { console.log(`${task.id} ${arm.id} #${rep}: workspace gone, kept as is`); continue; }
+    const before = `${r.resolved ? 'RESOLVED' : 'unresolved'} ${r.hidden.pass}/${r.hidden.total} (declared ${r.hidden.declared})`;
+    const g = await grade(task, workspace);
+    const p = g.hidden.pass > 0 ? await perf(task, workspace) : undefined;
+    Object.assign(r, { resolved: g.resolved, hidden: g.hidden, regression: 'regression' in g ? g.regression : undefined, perf: p, gradeOutput: g.output, regradedAt: new Date().toISOString() });
+    writeFileSync(file, JSON.stringify(r, null, 2));
+    console.log(`${task.id} ${arm.id} #${rep}: ${before} → ${g.resolved ? 'RESOLVED' : 'unresolved'} ${g.hidden.pass}/${g.hidden.total} (declared ${g.hidden.declared})${p ? ` · perf ${JSON.stringify(p)}` : ''}`);
+  }
+  process.exit(0);
+}
+
 const QUOTA_WAIT_MIN = Number(process.env.BENCH_QUOTA_WAIT_MIN ?? 20);
 const QUOTA_MAX_WAIT_MIN = Number(process.env.BENCH_QUOTA_MAX_WAIT_MIN ?? 12 * 60);
 
@@ -172,7 +198,7 @@ for (const [i, { task, arm, rep }] of matrix.entries()) {
     } else {
       runId = `${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${Math.random().toString(16).slice(2, 8)}`;
       const guides = arm.guides?.map(g => `## ${g}\n\n${readFileSync(guidePath(g), 'utf8').trim()}`).join('\n\n');
-      const single = runSingle({ requirement, source: seed, profile, process: !!arm.process, guides, label, runId });
+      const single = runSingle({ requirement, source: seed, profile, process: !!arm.process, guides, label, runId, turnTimeoutMs: task.timeLimitMinutes * 60_000 });
       status = await Promise.race([single.then(r => r.status), deadline]);
     }
     clearTimeout(timer);
