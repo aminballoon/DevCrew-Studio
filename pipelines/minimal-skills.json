@@ -32,5 +32,10 @@
       "review": "code",
       "reviseTo": "build"
     }
-  ]
+  ],
+  "guideHashes": {
+    "risk-planner": "204cc0ef386e8891",
+    "test-engineer": "ce931df242f9083a",
+    "careful-developer": "ca137ce30e17e48a"
+  }
 }
