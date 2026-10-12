@@ -7,6 +7,7 @@ import { captureBaseline, countDeclaredTests, verify, type TestBaseline, type Ve
 import { commitAll, diffSince, prepareWorkspace, type Workspace } from '../guard/workspace';
 import { readPlan, readText, type Plan } from './plan';
 import { agentStepPrompt, devPrompt, plannerPrompt, qaPrompt } from './prompts';
+import { requirementClauses } from './requirement';
 import { collectReports, reportPaths } from './reports';
 import { readSystem } from './system';
 import { agentTurn, closeSessions, getBus, getConfig, type TurnContext } from './runtime';
@@ -102,21 +103,24 @@ const planner = (def: PipelineDef) => node('planner', async s => {
     to: [stepName(def.steps[def.steps.findIndex(x => x.type === 'planner') + 1]), 'then QA and Dev'],
   };
   const earlier = reportPaths(def, def.steps.findIndex(x => x.type === 'planner'));
-  await agentTurn(ctx(s, 'planner', { ...io, reads: earlier }), plannerPrompt(s.requirement, s.feedback, earlier));
-  try {
-    return { plan: readPlan(s.workspace!.path), feedback: null, revisedTo: null };
-  } catch (e) {
-    // One chance to fix a malformed plan before failing the run
-    await agentTurn(ctx(s, 'planner', { ...io, from: ['System: the plan file was invalid'] }), `Your plan is unusable: ${(e as Error).message}. Fix .devcrew/plan.json.`);
-    return { plan: readPlan(s.workspace!.path), feedback: null, revisedTo: null };
+  const clauses = requirementClauses(s.requirement);
+  await agentTurn(ctx(s, 'planner', { ...io, reads: earlier }), plannerPrompt(s.requirement, s.feedback, earlier, clauses));
+  // Two chances to fix a malformed or incomplete plan before failing the run
+  for (let fix = 0; ; fix++) {
+    try {
+      return { plan: readPlan(s.workspace!.path, clauses), feedback: null, revisedTo: null };
+    } catch (e) {
+      if (fix === 2) { throw e; }
+      await agentTurn(ctx(s, 'planner', { ...io, from: ['System: the plan file was invalid'] }), `Your plan is unusable: ${(e as Error).message}. Fix .devcrew/PRD.md and .devcrew/plan.json.`);
+    }
   }
 });
 
 const qa = (def: PipelineDef) => node('qa', async s => {
   closeSessions(s.runId, 'dev');
   const earlier = reportPaths(def, def.steps.findIndex(x => x.type === 'qa'));
-  const io = { from: ['Planner: spec, contracts and module list'], reads: [...PLAN_FILES, ...earlier], to: ['Dev (build against them)', 'Verify (judge with them)'] };
-  await agentTurn(ctx(s, 'qa', io), qaPrompt(s.plan!, earlier));
+  const io = { from: ['You: the requirement', 'Planner: spec, contracts and module list'], reads: [...PLAN_FILES, ...earlier], to: ['Dev (build against them)', 'Verify (judge with them)'] };
+  await agentTurn(ctx(s, 'qa', io), qaPrompt(s.plan!, earlier, s.requirement, requirementClauses(s.requirement)));
   if (countDeclaredTests(s.workspace!.path) === 0) {
     await agentTurn(ctx(s, 'qa', { ...io, from: ['System: no tests were found'] }), 'No test cases were found under tests/. Write the tests now.');
   }
@@ -139,7 +143,7 @@ const dev = (def: PipelineDef) => node('dev', async s => {
     reads: ['.devcrew/PRD.md', 'contracts/', `tests/${module.id}/`, ...earlier],
     to: ['Verify'],
   };
-  const turn = await agentTurn(ctx(s, 'dev', io, module.id), devPrompt(s.plan!, module, attempt, s.lastVerify, s.feedback, earlier));
+  const turn = await agentTurn(ctx(s, 'dev', io, module.id), devPrompt(s.plan!, module, attempt, s.lastVerify, s.feedback, earlier, s.requirement, requirementClauses(s.requirement)));
   const issue = turn.text.match(/^SPEC_ISSUE:\s*(.+)$/m)?.[1] ?? null;
   return {
     attempt,
@@ -219,6 +223,7 @@ const agentNode = (step: AgentStep, nextStep: Step | undefined) => node(step.id,
     round: sentBack + 1,
     feedback: sentBack ? s.reviews[step.id] ?? null : null,
     gateFeedback,
+    clauses: requirementClauses(s.requirement),
   }));
   // One chance to fix a diagram the dashboard cannot draw
   const diagramProblems = step.mayWrite.some(p => p === SYSTEM_DIAGRAM || (p.endsWith('/') && SYSTEM_DIAGRAM.startsWith(p))) ? readSystem(s.workspace!.path).errors : [];

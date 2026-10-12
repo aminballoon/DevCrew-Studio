@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Check } from '../guard/verify';
 import { TEST_FORMATS, type TestFormat } from '../guard/testFormats';
+import type { Clause } from './requirement';
 
 export interface PlanModule { id: string; title: string; description: string }
 
@@ -31,12 +32,17 @@ export interface Plan {
   checks?: Check[];
   /** Test output formats the test command prints (see guard/testFormats.ts); found automatically when absent. */
   testFormats?: string[];
+  /** Requirement clause id (R-n) → the acceptance criteria (AC-n) that cover it. */
+  coverage?: Record<string, string[]>;
 }
 
 export const PLAN_PATH = '.devcrew/plan.json';
 
-/** The planner's plan.json, validated. Throws with a message the planner can act on. */
-export function readPlan(workspace: string): Plan {
+/**
+ * The planner's plan.json, validated. Throws with a message the planner can act on.
+ * With the requirement's clauses, every clause must be covered by acceptance criteria that exist in PRD.md.
+ */
+export function readPlan(workspace: string, clauses?: Clause[]): Plan {
   const path = join(workspace, PLAN_PATH);
   if (!existsSync(path)) { throw new Error(`${PLAN_PATH} was not written`); }
   let raw: Partial<Plan>;
@@ -44,6 +50,7 @@ export function readPlan(workspace: string): Plan {
   const modules = (raw.modules ?? []).filter(m => m && typeof m.id === 'string' && /^[a-z0-9][a-z0-9-]*$/.test(m.id));
   if (!modules.length) { throw new Error(`${PLAN_PATH} has no modules with kebab-case ids`); }
   const architecture = readArchitecture((raw as { architecture?: unknown }).architecture, modules.map(m => m.id));
+  const coverage = clauses?.length ? readCoverage(workspace, (raw as { coverage?: unknown }).coverage, clauses) : undefined;
   return {
     modules: modules.map(m => ({ id: m.id, title: m.title ?? m.id, description: m.description ?? '' })),
     architecture,
@@ -51,7 +58,34 @@ export function readPlan(workspace: string): Plan {
     moduleTestCommand: raw.moduleTestCommand?.includes('{module}') ? raw.moduleTestCommand : undefined,
     checks: (raw.checks ?? []).filter(c => c?.name && c?.command),
     testFormats: Array.isArray(raw.testFormats) ? raw.testFormats.filter(f => TEST_FORMATS.includes(f as TestFormat)) : undefined,
+    coverage,
   };
+}
+
+function readCoverage(workspace: string, raw: unknown, clauses: Clause[]): Record<string, string[]> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`${PLAN_PATH} has no "coverage": map every requirement clause (R-1 … R-${clauses.length}) to the acceptance criteria that cover it`);
+  }
+  const prd = readText(workspace, '.devcrew/PRD.md', 200_000) ?? '';
+  const known = new Set(prd.match(/\bAC-\d+\b/g) ?? []);
+  const coverage: Record<string, string[]> = {};
+  const missing: string[] = [];
+  const unknown = new Set<string>();
+  for (const { id } of clauses) {
+    const acs = (raw as Record<string, unknown>)[id];
+    const list = Array.isArray(acs) ? acs.filter((a): a is string => typeof a === 'string') : [];
+    list.filter(a => !known.has(a)).forEach(a => unknown.add(a));
+    if (!list.some(a => known.has(a))) { missing.push(id); }
+    coverage[id] = list;
+  }
+  const problems = [
+    missing.length ? `requirement clauses with no acceptance criterion in PRD.md: ${missing.join(', ')}` : '',
+    unknown.size ? `acceptance criteria not found in PRD.md: ${[...unknown].join(', ')}` : '',
+  ].filter(Boolean);
+  if (problems.length) {
+    throw new Error(`${PLAN_PATH} "coverage" is incomplete: ${problems.join('; ')}. Add or widen acceptance criteria so each clause is covered word for word, then update coverage`);
+  }
+  return coverage;
 }
 
 function readArchitecture(raw: unknown, moduleIds: string[]): ArchFile[] {

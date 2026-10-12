@@ -2,6 +2,16 @@
 
 อัปเดตล่าสุด: 2026-10-12
 
+## Latest changes (2026-10-12, requirement clauses for every role; branch `pipeline-findings-loop`)
+Found in the L-01 pilot: QA, Dev and the reviewers never saw the customer's requirement, only the Planner's PRD, so a detail the Planner dropped ("store the title trimmed") could not be caught, and reviewers that did notice it still approved.
+- The requirement is split into numbered clauses (R-1, R-2, ...; sentences, table rows, code blocks) in `src/orchestrator/requirement.ts`.
+- The Planner must map every clause to acceptance criteria in `plan.json` `coverage`; a clause with no criterion, or a criterion missing from PRD.md, sends the plan back (now two fix turns before the run fails).
+- QA, Dev and every reviewer get the clauses as the source of truth ("where PRD.md says less, follow the requirement"). Reviewers that can send work back must answer `VERDICT: changes` for code that misses a clause, whatever its severity.
+- Draft `pipelines/drafts/with-security.json`, waiting for your review: the Reviewer sends work back to Dev once (it only reported before), and the security reviewer may also send back requirement gaps.
+- The fake agent adds a coverage map to its scripted plans.
+- Tests: 41 (clause splitting, coverage validation).
+- Benchmark runs made before this change are "v1"; the prompts hash in each result tells them apart.
+
 ## Latest changes (2026-10-12, Antigravity agent)
 - New agent `agy` and profile `agy`: Antigravity CLI through `google-antigravity-acp@2.0.1` (third-party, MIT, the same adapter vscode-acp uses), model `gemini-3.8-flash-high`. The profile maps every role to agy, including the `security` step of `with-security` (which names codex otherwise).
 - The adapter auto-approves agy's own tool calls; DevCrew's scope guard still reverts out-of-scope writes.

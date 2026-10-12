@@ -47,7 +47,7 @@ class FakeAgent {
       await delay(delayMs / 2);
       const full = path.join(this.cwd, rel);
       fs.mkdirSync(path.dirname(full), { recursive: true });
-      fs.writeFileSync(full, content);
+      fs.writeFileSync(full, rel === '.devcrew/plan.json' ? withCoverage(content, text, turn.files, this.cwd) : content);
       await send({ sessionUpdate: 'tool_call_update', toolCallId: id, title: `Write ${rel}`, status: 'completed' });
     }
     for (const title of turn.commands ?? []) {
@@ -69,3 +69,14 @@ class FakeAgent {
 
 const stream = acp.ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin));
 new acp.AgentSideConnection(conn => new FakeAgent(conn), stream);
+
+/** Scripted plans predate requirement coverage: map every clause the prompt lists to the PRD's first criterion. */
+function withCoverage(content, prompt, files, cwd) {
+  const plan = JSON.parse(content);
+  const ids = [...new Set(prompt.match(/^\s*R-\d+(?=:)/gm)?.map(s => s.trim()) ?? [])];
+  const prdPath = path.join(cwd, '.devcrew/PRD.md');
+  const prd = files['.devcrew/PRD.md'] ?? (fs.existsSync(prdPath) ? fs.readFileSync(prdPath, 'utf8') : '');
+  const ac = prd.match(/\bAC-\d+\b/)?.[0];
+  if (!plan.coverage && ids.length && ac) { plan.coverage = Object.fromEntries(ids.map(id => [id, [ac]])); }
+  return JSON.stringify(plan, null, 2);
+}

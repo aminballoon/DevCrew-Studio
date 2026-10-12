@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { filesFor, readPlan } from '../src/orchestrator/plan';
+import { requirementClauses } from '../src/orchestrator/requirement';
 
 function withPlan(plan: unknown): string {
   const ws = mkdtempSync(join(tmpdir(), 'devcrew-plan-'));
@@ -42,4 +43,18 @@ test('architecture files are normalised and can be picked per module', () => {
   assert.equal(plan.architecture[3].kind, 'source', 'unknown kinds fall back to source');
   assert.deepEqual(filesFor(plan, 'core', ['source']).map(f => f.path), ['src/core.ts', 'tests/core/core.test.ts']);
   assert.deepEqual(filesFor(plan, 'extras', ['contract']).map(f => f.path), ['contracts/api.d.ts'], 'shared files count for every module');
+});
+
+test('every requirement clause must be covered by acceptance criteria that exist in the PRD', () => {
+  const clauses = requirementClauses('- `title` is trimmed and must be 1 to 100 characters.\n- Overlap throws `ConflictError`.\n- Booking ids are unique strings.');
+  const architecture = { files: [{ path: 'src/a.ts', kind: 'source', purpose: 'All of it' }] };
+  const ws = withPlan({ modules, architecture });
+  writeFileSync(join(ws, '.devcrew/PRD.md'), '- **AC-1**: title rules\n- **AC-2**: overlap\n');
+  assert.throws(() => readPlan(ws, clauses), /no "coverage"/);
+  writeFileSync(join(ws, '.devcrew/plan.json'), JSON.stringify({ modules, architecture, coverage: { 'R-1': ['AC-1'], 'R-2': ['AC-2', 'AC-9'] } }));
+  assert.throws(() => readPlan(ws, clauses), /no acceptance criterion in PRD\.md: R-3; acceptance criteria not found in PRD\.md: AC-9/);
+  writeFileSync(join(ws, '.devcrew/plan.json'), JSON.stringify({ modules, architecture, coverage: { 'R-1': ['AC-1'], 'R-2': ['AC-2'], 'R-3': ['AC-2'] } }));
+  assert.deepEqual(readPlan(ws, clauses).coverage, { 'R-1': ['AC-1'], 'R-2': ['AC-2'], 'R-3': ['AC-2'] });
+  // Without clauses (old callers) coverage is not required
+  assert.equal(readPlan(withPlan({ modules, architecture })).coverage, undefined);
 });
