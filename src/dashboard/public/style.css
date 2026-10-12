@@ -551,9 +551,15 @@ pre.code { background: var(--panel-2); padding: 12px; border-radius: 8px; overfl
 .sys-link.mechanical, .sys-arrow.mechanical, .sys-legend .mechanical { --l: var(--muted); }
 .sys-label { font-size: 10.5px; fill: var(--text); paint-order: stroke; stroke: var(--panel-2); stroke-width: 4px; }
 .sys-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px; font-size: 12px; }
-.sys-legend span:not(.hint)::before { content: ""; display: inline-block; width: 18px; height: 0; border-top: 2px solid var(--l); margin-right: 6px; vertical-align: middle; }
+.sys-legend button { border: 1px solid var(--border); background: var(--panel); color: var(--text); border-radius: 999px; padding: 2px 10px; cursor: pointer; font-size: 12px; }
+.sys-legend button.off { opacity: .45; text-decoration: line-through; }
+.sys-legend button::before { content: ""; display: inline-block; width: 18px; height: 0; border-top: 2px solid var(--l); margin-right: 6px; vertical-align: middle; }
 .sys-legend .power::before { border-top-style: dashed !important; }
 .sys-legend .mechanical::before { border-top-style: dotted !important; }
+.sys-link.power, .sys-link.mechanical { opacity: .6; }
+.sys-label { pointer-events: auto; }
+.hide-data .data, .hide-control .control, .hide-power .power, .hide-mechanical .mechanical { display: none; }
+.sys-legend button.data, .sys-legend button.control, .sys-legend button.power, .sys-legend button.mechanical { display: inline-block; }
 .k-compute { --k: var(--dev); }
 .k-controller { --k: var(--planner); }
 .k-sensor { --k: var(--qa); }

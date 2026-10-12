@@ -1118,14 +1118,17 @@ function reportPanes(reports) {
 const SYS_KIND = { compute: 'Compute', controller: 'Controller', sensor: 'Sensor', actuator: 'Actuator', power: 'Power', network: 'Network', storage: 'Storage', software: 'Software', interface: 'Interface', external: 'External', user: 'User' };
 
 /**
- * Blocks in columns by how far down the signal chain they are (power and sources on the
- * left), with a curve per link labelled with its interface. Loops are broken in list order.
+ * Blocks in columns by how far down the data and control chain they are, with a curve per
+ * link labelled with its interface. Power and mechanical links do not set the columns (a
+ * power rail touches everything and would stretch the diagram), and loops are broken in list
+ * order. Clicking a legend entry hides that kind of link.
  */
 function renderSystem(sys) {
   const blocks = sys.blocks, byId = new Map(blocks.map(b => [b.id, b]));
   const links = sys.links.filter(l => byId.has(l.from) && byId.has(l.to) && l.from !== l.to);
   const out = new Map(blocks.map(b => [b.id, []]));
-  for (const l of links) out.get(l.from).push(l.to);
+  const signal = links.filter(l => !['power', 'mechanical'].includes(l.kind ?? 'data'));
+  for (const l of signal) out.get(l.from).push(l.to);
   // Depth-first order; a link back into the current path is a loop and does not rank
   const state = new Map(), order = [], forward = new Set();
   const visit = id => {
@@ -1144,7 +1147,7 @@ function renderSystem(sys) {
   const cols = [];
   const groupIndex = new Map((sys.groups ?? []).map((g, i) => [g.id, i]));
   blocks.forEach((b, i) => { (cols[rank.get(b.id)] ??= []).push({ b, i }); });
-  const BW = 176, BH = 70, CG = 120, RG = 34, PAD = 20;
+  const BW = 176, BH = 70, CG = 170, RG = 34, PAD = 20;
   const tallest = Math.max(...cols.map(c => c?.length ?? 0));
   const height = PAD * 2 + tallest * BH + (tallest - 1) * RG;
   const at = new Map();
@@ -1171,9 +1174,10 @@ function renderSystem(sys) {
       d = `M${x0} ${y0} C${x0} ${dip} ${x1} ${dip} ${x1} ${y1}`;
       lx = (x0 + x1) / 2; ly = dip - 6;
     }
-    edges += `<path class="sys-link ${kind}" d="${d}" marker-end="url(#sys-arr-${kind})"/>`;
     const text = [l.interface, l.label].filter(Boolean).join(' · ');
-    if (text) labels += `<text class="sys-label" x="${lx}" y="${ly - 4}" text-anchor="middle">${esc(text.length > 34 ? text.slice(0, 33) + '…' : text)}<title>${esc(text)}</title></text>`;
+    edges += `<path class="sys-link ${kind}" d="${d}" marker-end="url(#sys-arr-${kind})"><title>${esc(`${byId.get(l.from).name} → ${byId.get(l.to).name}: ${text}`)}</title></path>`;
+    const short = l.interface && l.interface.length <= 22 ? l.interface : (l.interface ?? text).slice(0, 21) + '…';
+    if (text) labels += `<text class="sys-label ${kind}" x="${lx}" y="${ly - 4}" text-anchor="middle">${esc(short)}<title>${esc(text)}</title></text>`;
   });
   const boxes = blocks.map(b => {
     const { x, y } = at.get(b.id);
@@ -1186,8 +1190,9 @@ function renderSystem(sys) {
       <text class="sys-part ${b.part ? '' : 'none'}" x="${x + 16}" y="${y + 56}">${esc(part)}</text></g>`;
   }).join('');
   const markers = ['data', 'control', 'power', 'mechanical'].map(k => `<marker id="sys-arr-${k}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="sys-arrow ${k}"/></marker>`).join('');
-  const legend = `<div class="sys-legend"><span class="data">Data</span><span class="control">Control</span><span class="power">Power</span><span class="mechanical">Mechanical</span><span class="hint">Hover a block for its description.</span></div>`;
-  return `<div class="sys-diagram"><h4>${esc(sys.title)}</h4><div class="sys-scroll"><svg width="${width}" height="${height + 60}" viewBox="0 0 ${width} ${height + 60}" role="img" aria-label="System architecture diagram"><defs>${markers}</defs>${edges}${boxes}${labels}</svg></div>${legend}</div>`;
+  const present = new Set(links.map(l => l.kind ?? 'data'));
+  const legend = `<div class="sys-legend">${['data', 'control', 'power', 'mechanical'].filter(k => present.has(k)).map(k => `<button type="button" class="${k}" data-kind="${k}" title="Show or hide these links">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}<span class="hint">Click a link type to hide it. Hover a block or line for details.</span></div>`;
+  return `<div class="sys-diagram" onclick="const b = event.target.closest('[data-kind]'); if (b) { this.classList.toggle('hide-' + b.dataset.kind); b.classList.toggle('off'); }"><h4>${esc(sys.title)}</h4><div class="sys-scroll"><svg width="${width}" height="${height + 60}" viewBox="0 0 ${width} ${height + 60}" role="img" aria-label="System architecture diagram"><defs>${markers}</defs>${edges}${boxes}${labels}</svg></div>${legend}</div>`;
 }
 
 function gateButtons(defs) {
