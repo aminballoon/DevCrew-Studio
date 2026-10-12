@@ -53,7 +53,7 @@ test('counts declared tests in every supported language', () => {
   assert.equal(declaredIn('tests/fw/test_x.c', unityRunner), 2, 'a Unity runner is not counted twice');
   assert.equal(declaredIn('tests/fw/test_y.c', 'void test_a(void)\n{\n}\nvoid test_b(void) {\n}\n'), 2);
   assert.equal(declaredIn('tests/a/x_test.cpp', 'TEST(A, b) {}\nTEST_F(Fix, c) {}\n'), 2);
-  assert.equal(declaredIn('tests/a/x.rs', '#[test]\nfn a() {}\n#[tokio::test]\nasync fn b() {}\n'), 2);
+  assert.equal(declaredIn('tests/a/x.rs', '#[test]\nfn a() {}\n#[tokio::test]\nasync fn b() {}\n#[tokio::test(flavor = "multi_thread", worker_threads = 4)]\nasync fn c() {}\n'), 3);
   assert.equal(declaredIn('tests/a/x_test.go', 'func TestA(t *testing.T) {}\nfunc helper() {}\n'), 1);
   assert.equal(declaredIn('tests/a/data.json', '{"test": 1}'), 0);
 });

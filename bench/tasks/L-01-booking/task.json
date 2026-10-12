@@ -1,0 +1,7 @@
+{
+  "id": "L-01-booking",
+  "size": "L",
+  "title": "Multi-organisation meeting room booking",
+  "timeLimitMinutes": 90,
+  "gradeCommand": "node --test \"hidden-tests/**/*.test.ts\""
+}

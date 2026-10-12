@@ -12,6 +12,8 @@ import { runSingle } from '../../src/orchestrator/single';
 
 interface Task {
   id: string; size: string; title: string; timeLimitMinutes: number; gradeCommand: string; regressionCommand?: string;
+  /** Run after grading when some hidden tests pass; must print one line `PERF {json}`. */
+  perfCommand?: string;
   /** Scripted agent profile that fits this task, used when running with --profile fake. */
   fakeProfile?: string;
 }
@@ -64,6 +66,24 @@ async function grade(task: Task, workspace: string) {
   }
   const resolved = hidden.fail === 0 && hidden.total >= declared && hidden.pass === hidden.total && (!regression || regression.pass === regression.total);
   return { hidden: { ...hidden, declared }, regression, resolved, output: run.output.slice(-4000) };
+}
+
+/** Run the task's performance probe 3 times and keep the median of each number. */
+async function perf(task: Task, workspace: string) {
+  if (!task.perfCommand) { return undefined; }
+  const runs: Record<string, Record<string, number>>[] = [];
+  for (let i = 0; i < 3; i++) {
+    const out = (await runCommand(task.perfCommand, workspace, 5 * 60_000)).output;
+    const line = out.split('\n').find(l => l.startsWith('PERF '));
+    if (line) { try { runs.push(JSON.parse(line.slice(5))); } catch { /* unreadable run is skipped */ } }
+  }
+  if (!runs.length) { return { runs: 0 }; }
+  const median = (xs: number[]) => xs.sort((a, b) => a - b)[Math.floor(xs.length / 2)];
+  const out: Record<string, Record<string, number>> = {};
+  for (const [group, values] of Object.entries(runs[0])) {
+    out[group] = Object.fromEntries(Object.keys(values).map(k => [k, median(runs.map(r => r[group]?.[k]).filter(v => typeof v === 'number'))]));
+  }
+  return { runs: runs.length, ...out };
 }
 
 function metrics(events: DevcrewEvent[]) {
@@ -130,16 +150,18 @@ for (const [i, { task, arm, rep }] of matrix.entries()) {
   const workspace = started?.type === 'run_started' ? started.workspace : '';
 
   const g = workspace ? await grade(task, workspace) : { hidden: { total: 0, pass: 0, fail: 0, skipped: 0, declared: 0 }, resolved: false, output: '' };
+  const p = workspace && g.hidden.pass > 0 ? await perf(task, workspace) : undefined;
   const m = metrics(getBus().read(runId));
   const result = {
     task: task.id, size: task.size, arm: arm.id, rep, profile, runId, status,
     resolved: g.resolved, hidden: g.hidden, regression: 'regression' in g ? g.regression : undefined,
     ...m,
+    perf: p,
     meta: { finishedAt: new Date().toISOString(), configHash: sha(config), promptsHash: sha(prompts), node: process.version },
     gradeOutput: g.output,
   };
   writeFileSync(file, JSON.stringify(result, null, 2));
-  console.log(`${g.resolved ? 'RESOLVED' : 'unresolved'} · hidden ${g.hidden.pass}/${g.hidden.total} · ${m.tokens.total.toLocaleString()} tokens · $${m.costUsd.toFixed(2)} · ${Math.round(m.wallMs / 1000)}s`);
+  console.log(`${g.resolved ? 'RESOLVED' : 'unresolved'} · hidden ${g.hidden.pass}/${g.hidden.total} · ${m.tokens.total.toLocaleString()} tokens · $${m.costUsd.toFixed(2)} · ${Math.round(m.wallMs / 1000)}s${p ? ` · perf ${JSON.stringify(p)}` : ''}`);
 }
 
 console.log(`\nResults in bench/results/${suite}. Open the dashboard's Benchmark tab to compare arms.`);

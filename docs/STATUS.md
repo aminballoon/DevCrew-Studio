@@ -2,6 +2,41 @@
 
 อัปเดตล่าสุด: 2026-10-12
 
+## Latest changes (2026-10-12, Antigravity agent)
+- New agent `agy` and profile `agy`: Antigravity CLI through `google-antigravity-acp@2.0.1` (third-party, MIT, the same adapter vscode-acp uses), model `gemini-3.8-flash-high`. The profile maps every role to agy, including the `security` step of `with-security` (which names codex otherwise).
+- The adapter auto-approves agy's own tool calls; DevCrew's scope guard still reverts out-of-scope writes.
+- Token usage: the adapter sends no usage on the prompt response, only `usage_update.used` per model call. `AgentSession` now sums those as `totalTokens` when the response has none, so agy runs show a total only (no input/output split, no cost).
+- Checked with a real one-turn session: agy created the file and replied; 24,164 tokens recorded.
+- First full run on agy: `npm run bench -- --tasks S-01-cart --arms multi-minimal --profile agy --suite smoke-agy` → resolved, hidden 13/13, 796k tokens, 18 min (Planner 5 min / 287k, QA 7 min / 241k, Dev 2 parts first try). agy is slow and token-heavy on a small task (56 tool calls for the plan).
+- New benchmark arms: `multi-minimal` (D, pipeline `minimal`) and `multi-security` (E, pipeline `with-security`).
+- New task `L-01-booking` (size L, 90 min): multi-organisation meeting room booking with roles, overlap rules, time-zones, a per-member limit and tenant isolation. 33 hidden tests in three files (functions, rules, security). Checked against a reference implementation kept outside the repo (33/33), and each of six planted bugs (no limit, closed intervals, shared objects, viewer may book, anyone may cancel, no time-zone check) fails at least one test.
+- Rust (1.99) is installed on this machine. Shells started before the install, including the one that runs the bench, need `export PATH=$HOME/.cargo/bin:$PATH`.
+
+## Latest changes (2026-10-12, benchmark task suite for the vendor comparison)
+Five tasks, each with hidden tests checked against a reference implementation kept outside the repo (so agents can never find it), and with planted bugs to make sure the tests catch them:
+
+| Task | Size | Hidden tests | Checks | Planted bugs caught |
+|---|---|---|---|---|
+| `L-01-booking` | L | 33 | functions, rules, security (IDOR, cross-tenant rights, copies) | 6/6 |
+| `CR-01-booking-recurring` | CR | 45 (12 new + the 33 old as regression) | change request on a working codebase: weekly series, all-or-nothing, limit counts a series once, shorter member bookings | 7/7 |
+| `L-02-ledger` | L | 17 | idempotency keys, frozen accounts, reversals, state kept in an async store, concurrent calls (no double spend) | 5/6 (the sixth could not be planted in the reference's design) |
+| `L-03-files` | L | 19 | magic-byte type checks, quotas, path traversal in names and owners, IDOR, share-token entropy, expiry | 6/7 (same) |
+| `L-04-zenoh` | L | 16 Rust (frames + live Zenoh bridge) + perf probe | frame decoding, CRC, never panics, stats/errors topics, last-value queryable, garbage flood | 5/6 (Zenoh itself drops replies on keys outside the query) |
+
+- `L-04-zenoh` seed pins `zenoh = 1.10.1` with a `Cargo.lock`; a release build of the dependencies takes about 1.5 min. Bridge tests run 5 times in a row without a flake. Reference perf: latency p50 230 µs, p99 1.4 ms at 1000 frames/s; about 4,900 frames/s throughput (it publishes one at a time, so there is room to do better).
+- Bench runner: tasks may set `perfCommand`; when any hidden test passes it runs 3 times and the result keeps the median of each number under `perf`.
+- Rust test counting now includes `#[tokio::test(...)]` with arguments.
+- Dashboard size label `CR` now reads "Change request on existing code" (there is no mid-run injection; the change request is given on top of a working codebase).
+- Pilot on agy, `L-01-booking`, one run per arm (suite `pilot-agy`; one run each, so no conclusion yet):
+
+| Arm | Hidden tests | Tokens | Time |
+|---|---|---|---|
+| A, one AI, plain prompt | 33/33 resolved | 291k | 10 min |
+| D, minimal team | 33/33 resolved | 1.59M | 38 min |
+| E, team + security review | 32/33 | 1.84M | 47 min |
+
+  E missed "store the title trimmed": the Planner's AC-29 kept only "length after trimming", so QA did not test it and Dev did not do it. Both the security reviewer and the code reviewer reported it as a low finding and still answered `approve`, so it never went back to Dev. On this task the team costs 5–6× the tokens for no gain; L-01 is likely too easy.
+
 ## Latest changes (2026-10-12, UX pass 1)
 - Platform rule: **English only, no emoji** in the product (UI, configs, CLI output).
 - Run view: kept the original pipeline diagram; unused detour arrows are now hidden until they happen. Clicking a box filters the activity log to that role; hovering highlights the matching box and log steps.

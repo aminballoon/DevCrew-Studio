@@ -136,7 +136,7 @@ const DECLARED: { ext: RegExp; count: (src: string) => number }[] = [
       return gtest + unity;
     },
   },
-  { ext: /\.rs$/, count: src => (src.match(/#\[(?:tokio::)?test\]/g) ?? []).length },
+  { ext: /\.rs$/, count: src => (src.match(/#\[(?:tokio::)?test(?:\([^)\]]*\))?\]/g) ?? []).length },
   { ext: /_test\.go$/, count: src => (src.match(/^func\s+Test\w*\s*\(/gm) ?? []).length },
 ];
 

@@ -1,0 +1,7 @@
+{
+  "id": "L-02-ledger",
+  "size": "L",
+  "title": "Internal money ledger with idempotency and concurrency",
+  "timeLimitMinutes": 90,
+  "gradeCommand": "node --test \"hidden-tests/**/*.test.ts\""
+}

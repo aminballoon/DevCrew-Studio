@@ -1459,7 +1459,7 @@ function pipelineDetail(p) {
 // ---------- Benchmark ----------
 
 const SIZES = ['S', 'M', 'L', 'XL', 'Brownfield', 'CR'];
-const SIZE_NAME = { S: 'Small', M: 'Medium', L: 'Large', XL: 'Extra large', Brownfield: 'Change existing code', CR: 'Requirement changes midway' };
+const SIZE_NAME = { S: 'Small', M: 'Medium', L: 'Large', XL: 'Extra large', Brownfield: 'Change existing code', CR: 'Change request on existing code' };
 const ROLE_TAG = { baseline: 'Baseline', control: 'Control group', candidate: 'What we test' };
 const median = xs => { const s = [...xs].sort((a, b) => a - b); return s.length ? (s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2) : 0; };
 /** Fewer runs than this per group: say plainly that nothing can be concluded yet. */

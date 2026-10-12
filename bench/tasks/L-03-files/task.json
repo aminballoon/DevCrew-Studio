@@ -1,0 +1,7 @@
+{
+  "id": "L-03-files",
+  "size": "L",
+  "title": "File storage with type checks, quotas and share links",
+  "timeLimitMinutes": 90,
+  "gradeCommand": "node --test \"hidden-tests/**/*.test.ts\""
+}
