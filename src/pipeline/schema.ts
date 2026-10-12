@@ -11,9 +11,14 @@ import { STUDIO_ROOT } from '../core/config';
  */
 export type Step = PlannerStep | QaStep | BuildStep | GateStep | AgentStep;
 
-export interface PlannerStep { type: 'planner'; id: 'planner' }
-export interface QaStep { type: 'qa'; id: 'qa' }
-export interface BuildStep {
+/**
+ * Built-in roles keep DevCrew's own instructions; `guide` ("guide:<name>") adds a role guide on top,
+ * such as the techniques and tools a specialist uses. A run carries its text in `guideText`.
+ */
+interface WithGuide { guide?: string; guideText?: string }
+export interface PlannerStep extends WithGuide { type: 'planner'; id: 'planner' }
+export interface QaStep extends WithGuide { type: 'qa'; id: 'qa' }
+export interface BuildStep extends WithGuide {
   type: 'build';
   id: 'build';
   /** Dev attempts per module before asking a human (defaults to the config value). */
@@ -98,14 +103,21 @@ export const guideHash = (name: string) => hash(readFileSync(guidePath(name), 'u
 
 /** Every guide the pipeline's steps use. */
 export const guidesOf = (def: PipelineDef) =>
-  [...new Set(def.steps.flatMap(s => (s.type === 'agent' && guideName(s.instructions) ? [guideName(s.instructions)!] : [])))];
+  [...new Set(def.steps.flatMap(s => {
+    const name = s.type === 'agent' ? guideName(s.instructions) : 'guide' in s ? guideName(s.guide) : null;
+    return name ? [name] : [];
+  }))];
 
 /** The definition with every guide's text in place of its "guide:" reference, as a run uses it. */
 export function withGuides(def: PipelineDef): PipelineDef {
   return {
     ...def,
     steps: def.steps.map(s => {
-      const name = s.type === 'agent' ? guideName(s.instructions) : null;
+      if (s.type !== 'agent') {
+        const name = 'guide' in s ? guideName(s.guide) : null;
+        return name ? { ...s, guideText: readFileSync(guidePath(name), 'utf8').trim() } : s;
+      }
+      const name = guideName(s.instructions);
       return name ? { ...s, instructions: readFileSync(guidePath(name), 'utf8').trim() } : s;
     }),
   };
@@ -201,6 +213,11 @@ export function validatePipeline(raw: unknown): string[] {
       else if (s.review === 'plan' && target.type !== 'planner' && !(target.type === 'agent' && index(target.id) < iBuild)) {
         errors.push(`${where}: a plan review sends feedback to "planner" or to an agent step before "build".`);
       }
+    }
+    if ((s.type === 'planner' || s.type === 'qa' || s.type === 'build') && s.guide !== undefined) {
+      const guide = guideName(s.guide);
+      if (!guide) { errors.push(`${where}: "guide" must be "guide:<name>" (lowercase letters, digits and -).`); }
+      else if (!existsSync(guidePath(guide))) { errors.push(`${where}: no role guide pipelines/roles/${guide}.md.`); }
     }
     if (s.type === 'agent') {
       if (typeof s.name !== 'string' || !s.name.trim()) { errors.push(`${where}: "name" is required.`); }

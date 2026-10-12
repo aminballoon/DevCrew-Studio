@@ -37,6 +37,9 @@ const PLAN_SCHEMA = `{
   }
 }`;
 
+/** A role guide on top of a built-in role's instructions: the specialist's techniques and tools. */
+const roleGuide = (text?: string) => (text ? `\nYour role guide. Follow it; it is how this team expects your role to work:\n"""\n${text}\n"""\n` : '');
+
 /** The customer's own words, for roles after the Planner: they win over any restatement. */
 function sourceOfTruth(requirement: string, clauses: Clause[]): string {
   return `The customer's requirement, split into numbered clauses. It is the source of truth: where .devcrew/PRD.md says less or something different, follow the requirement.
@@ -46,7 +49,7 @@ ${clauses.length ? clauseList(clauses) : requirement}
 `;
 }
 
-export function plannerPrompt(requirement: string, feedback: string | null, earlier: string[] = [], clauses: Clause[] = []): string {
+export function plannerPrompt(requirement: string, feedback: string | null, earlier: string[] = [], clauses: Clause[] = [], guide?: string): string {
   return `${header('planner')}
 You are the Planner (Product Owner + Architect) of a software team. You do not write application code or tests.
 
@@ -68,11 +71,11 @@ ${PLAN_SCHEMA}
    The architecture must list EVERY file the run will create or change (contracts, source, tests, config), each with a clear purpose a non-programmer can follow. The approver reviews it as a diagram before any code is written, and files outside it will be flagged.
 ${clauses.length ? `   "coverage" maps EVERY requirement clause below to the acceptance criteria that cover it. Each clause must be covered in full, word for word: if a clause says two things (for example "is trimmed and must be 1 to 100 characters"), the criteria must say both. A plan with an uncovered clause is sent back to you.
 ${clauseList(clauses).split('\n').map(l => `   ${l}`).join('\n')}
-` : ''}${feedback ? `\nThe approver sent this feedback on your previous plan. Address all of it:\n"""\n${feedback}\n"""\n` : ''}
+` : ''}${roleGuide(guide)}${feedback ? `\nThe approver sent this feedback on your previous plan. Address all of it:\n"""\n${feedback}\n"""\n` : ''}
 End with a short summary of the plan.`;
 }
 
-export function qaPrompt(plan: Plan, earlier: string[] = [], requirement = '', clauses: Clause[] = []): string {
+export function qaPrompt(plan: Plan, earlier: string[] = [], requirement = '', clauses: Clause[] = [], guide?: string): string {
   return `${header('qa')}
 You are the QA engineer. Read .devcrew/PRD.md and contracts/. The developer has not written any code yet.
 ${earlierReports(earlier)}
@@ -90,11 +93,12 @@ Rules:
 - Do not use skip, todo or only.
 - The suite will be run with: ${plan.testCommand}
 
+${roleGuide(guide)}
 After you finish, these files are locked: the developer cannot change them.
 End with a list of the test files and which ACs ${requirement ? 'and requirement clauses ' : ''}each covers.`;
 }
 
-export function devPrompt(plan: Plan, module: PlanModule, attempt: number, last: VerifyResult | null, feedback: string | null, earlier: string[] = [], requirement = '', clauses: Clause[] = []): string {
+export function devPrompt(plan: Plan, module: PlanModule, attempt: number, last: VerifyResult | null, feedback: string | null, earlier: string[] = [], requirement = '', clauses: Clause[] = [], guide?: string): string {
   const failure = attempt > 1 && last
     ? `\nYour previous attempt did not pass verification:\n${last.reasons.map(r => `- ${r}`).join('\n')}\n\nTest output (tail):\n\`\`\`\n${last.output.slice(-4000)}\n\`\`\`\nFix the code. The tests are correct by definition here; do not try to change them.\n`
     : '';
@@ -111,7 +115,7 @@ Rules:
 - Make the tests pass by implementing the behaviour, never by special-casing test inputs.
 - You may run the tests yourself: ${plan.moduleTestCommand?.replace('{module}', module.id) ?? plan.testCommand}
 - If the spec or contracts are contradictory or impossible to implement, stop and reply with a line starting with "SPEC_ISSUE:" explaining why.
-${failure}${feedback ? `\nThe approver asked for these changes:\n"""\n${feedback}\n"""\n` : ''}
+${roleGuide(guide)}${failure}${feedback ? `\nThe approver asked for these changes:\n"""\n${feedback}\n"""\n` : ''}
 End with a short summary of what you changed.`;
 }
 

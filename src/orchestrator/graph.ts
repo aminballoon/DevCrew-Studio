@@ -96,6 +96,12 @@ function gate(s: S, gateId: GateId, payload: Record<string, unknown>): GateAnswe
 
 // --- Nodes ---
 
+/** The role guide text a built-in step carries in this run, if any. */
+const guideOf = (def: PipelineDef, type: 'planner' | 'qa' | 'build') => {
+  const step = def.steps.find(x => x.type === type);
+  return step && 'guideText' in step ? step.guideText : undefined;
+};
+
 const planner = (def: PipelineDef) => node('planner', async s => {
   const io = {
     from: ['You: the task', ...(s.specIssue ? ['Dev: a spec problem'] : s.feedback ? ['You: feedback from a gate'] : [])],
@@ -104,7 +110,7 @@ const planner = (def: PipelineDef) => node('planner', async s => {
   };
   const earlier = reportPaths(def, def.steps.findIndex(x => x.type === 'planner'));
   const clauses = requirementClauses(s.requirement);
-  await agentTurn(ctx(s, 'planner', { ...io, reads: earlier }), plannerPrompt(s.requirement, s.feedback, earlier, clauses));
+  await agentTurn(ctx(s, 'planner', { ...io, reads: earlier }), plannerPrompt(s.requirement, s.feedback, earlier, clauses, guideOf(def, 'planner')));
   // Two chances to fix a malformed or incomplete plan before failing the run
   for (let fix = 0; ; fix++) {
     try {
@@ -120,7 +126,7 @@ const qa = (def: PipelineDef) => node('qa', async s => {
   closeSessions(s.runId, 'dev');
   const earlier = reportPaths(def, def.steps.findIndex(x => x.type === 'qa'));
   const io = { from: ['You: the requirement', 'Planner: spec, contracts and module list'], reads: [...PLAN_FILES, ...earlier], to: ['Dev (build against them)', 'Verify (judge with them)'] };
-  await agentTurn(ctx(s, 'qa', io), qaPrompt(s.plan!, earlier, s.requirement, requirementClauses(s.requirement)));
+  await agentTurn(ctx(s, 'qa', io), qaPrompt(s.plan!, earlier, s.requirement, requirementClauses(s.requirement), guideOf(def, 'qa')));
   if (countDeclaredTests(s.workspace!.path) === 0) {
     await agentTurn(ctx(s, 'qa', { ...io, from: ['System: no tests were found'] }), 'No test cases were found under tests/. Write the tests now.');
   }
@@ -143,7 +149,7 @@ const dev = (def: PipelineDef) => node('dev', async s => {
     reads: ['.devcrew/PRD.md', 'contracts/', `tests/${module.id}/`, ...earlier],
     to: ['Verify'],
   };
-  const turn = await agentTurn(ctx(s, 'dev', io, module.id), devPrompt(s.plan!, module, attempt, s.lastVerify, s.feedback, earlier, s.requirement, requirementClauses(s.requirement)));
+  const turn = await agentTurn(ctx(s, 'dev', io, module.id), devPrompt(s.plan!, module, attempt, s.lastVerify, s.feedback, earlier, s.requirement, requirementClauses(s.requirement), guideOf(def, 'build')));
   const issue = turn.text.match(/^SPEC_ISSUE:\s*(.+)$/m)?.[1] ?? null;
   return {
     attempt,
