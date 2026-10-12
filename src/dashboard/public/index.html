@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DevCrew Studio</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%235b6cff'/><path d='M9 11h14M9 16h10M9 21h14' stroke='white' stroke-width='2.5' stroke-linecap='round'/></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"></span>
+      <span>DevCrew <b>Studio</b></span>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-tab="pipeline" aria-selected="true">Runs</button>
+      <button role="tab" data-tab="pipelines" aria-selected="false">Pipelines <span class="tab-badge" id="draft-count" hidden></span></button>
+      <button role="tab" data-tab="bench" aria-selected="false">Benchmark</button>
+    </nav>
+    <div class="topbar-actions">
+      <span id="conn" class="conn" title="Live connection">●</span>
+      <button id="new-run-btn" class="btn primary">+ New run</button>
+    </div>
+  </header>
+
+  <div class="layout" id="pipeline-tab">
+    <aside class="runs">
+      <div class="runs-head">Runs</div>
+      <ul id="run-list"></ul>
+    </aside>
+    <main id="run-view" class="run-view"></main>
+  </div>
+
+  <main id="pipelines-tab" class="pipelines" hidden></main>
+
+  <main id="bench-tab" class="bench" hidden></main>
+
+  <dialog id="new-run">
+    <form method="dialog" id="new-run-form">
+      <h2>Start a new run</h2>
+      <label>Task
+        <textarea name="requirement" rows="8" required placeholder="Describe what to build in plain words, e.g. a shopping cart with discount codes…"></textarea>
+      </label>
+      <label>Name <span class="hint">optional, shown in the run list</span>
+        <input name="label" placeholder="e.g. Cart discounts">
+      </label>
+      <label>Project folder <span class="hint">optional · a git repo gets a new branch, any other folder is copied</span>
+        <input name="source" placeholder="/path/to/project (leave empty for a new project)">
+      </label>
+      <label>Pipeline <span class="hint">which team and which review steps</span>
+        <select name="pipeline" id="pipeline-select"></select>
+      </label>
+      <p class="hint profile-note" id="pipeline-note"></p>
+      <div class="row">
+        <label>Agent profile
+          <select name="profile" id="profile-select"></select>
+        </label>
+        <label class="check"><input type="checkbox" name="autoApprove"> Approve every gate automatically <span class="hint">(benchmark mode)</span></label>
+      </div>
+      <p class="hint profile-note" id="profile-note"></p>
+      <div class="dialog-actions">
+        <button value="cancel" formnovalidate class="btn">Cancel</button>
+        <button value="start" class="btn primary">Start run</button>
+      </div>
+      <p class="hint" id="start-error" style="color:var(--bad)"></p>
+    </form>
+  </dialog>
+
+  <dialog id="role-dialog" class="role-dialog">
+    <div class="file-head"><div><h2 id="role-title"></h2><div class="hint" id="role-meta"></div></div><button type="button" class="btn" id="role-close">Close</button></div>
+    <div id="role-body" class="role-body"></div>
+  </dialog>
+
+  <dialog id="file-dialog" class="file-dialog">
+    <div class="file-head"><div><h2 id="file-title"></h2><div class="hint" id="file-meta"></div></div><button type="button" class="btn" id="file-close">Close</button></div>
+    <div id="file-body" class="file-body"></div>
+  </dialog>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

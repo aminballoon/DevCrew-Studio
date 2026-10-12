@@ -1,0 +1,18 @@
+{
+  "id": "single-process",
+  "code": "A+",
+  "name": "One AI · team process",
+  "summary": "One AI, but forced to follow the same steps as the AI team, with the system re-running tests. The only difference from the team: no split into separate AIs.",
+  "agents": 1,
+  "steps": [
+    "Plan and write a spec",
+    "Write tests first",
+    "Write the code",
+    "System runs tests → fix if failing (max 5 rounds)"
+  ],
+  "role": "control",
+  "color": "#f59e0b",
+  "mode": "single",
+  "process": true,
+  "profile": "claude"
+}

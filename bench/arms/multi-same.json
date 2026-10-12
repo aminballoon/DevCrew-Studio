@@ -1,0 +1,18 @@
+{
+  "id": "multi-same",
+  "code": "B",
+  "name": "AI team (DevCrew)",
+  "summary": "The work is split across several AIs by role. Each one sees only its own part. All roles use the same model.",
+  "agents": 4,
+  "steps": [
+    "Planner plans",
+    "QA writes tests",
+    "Dev codes one module at a time",
+    "System runs tests → fix if failing (max 5 rounds)",
+    "Reviewer checks the code"
+  ],
+  "role": "candidate",
+  "color": "#5b6cff",
+  "mode": "pipeline",
+  "profile": "claude"
+}

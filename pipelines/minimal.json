@@ -1,0 +1,12 @@
+{
+  "id": "minimal",
+  "name": "Minimal team",
+  "description": "Planner, QA and Dev with automatic test checks, without a code reviewer. Cheaper; use it for small, low-risk changes.",
+  "steps": [
+    { "type": "planner", "id": "planner" },
+    { "type": "gate", "id": "gate_spec", "title": "Review the spec and plan", "review": "plan", "reviseTo": "planner" },
+    { "type": "qa", "id": "qa" },
+    { "type": "build", "id": "build" },
+    { "type": "gate", "id": "gate_merge", "title": "Approve the merge", "review": "code", "reviseTo": "build" }
+  ]
+}

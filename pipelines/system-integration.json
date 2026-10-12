@@ -1,0 +1,94 @@
+{
+  "id": "system-integration",
+  "name": "System integration design",
+  "description": "For designing a system made of hardware and software parts, without writing code. An architect draws the system architecture diagram, a hardware scout searches the internet for parts that fit, and an architecture reviewer checks that everything works together, so you choose with evidence.",
+  "kind": "design",
+  "steps": [
+    {
+      "type": "agent",
+      "id": "architect",
+      "name": "System architect",
+      "purpose": "Turns the requirement into a system architecture: the blocks, what each does, and how they connect.",
+      "agent": "claude",
+      "instructions": "guide:system-architect",
+      "reads": [
+        ".devcrew/hardware/options.md (if it exists)",
+        ".devcrew/arch-review.md (if it exists)",
+        "any documents in this workspace"
+      ],
+      "mayWrite": [
+        ".devcrew/system.json",
+        ".devcrew/SYSTEM.md"
+      ],
+      "produces": [
+        ".devcrew/system.json: the system architecture diagram",
+        ".devcrew/SYSTEM.md: blocks, requirements per block, data, power and safety paths, open questions"
+      ]
+    },
+    {
+      "type": "gate",
+      "id": "gate_arch",
+      "title": "Review the system architecture",
+      "review": "design",
+      "reviseTo": "architect"
+    },
+    {
+      "type": "agent",
+      "id": "scout",
+      "name": "Hardware scout",
+      "purpose": "Searches the internet for hardware that fits each block and lays out the options so you can choose.",
+      "agent": "claude",
+      "instructions": "guide:hardware-scout",
+      "needs": [
+        "web"
+      ],
+      "reads": [
+        ".devcrew/system.json",
+        ".devcrew/SYSTEM.md"
+      ],
+      "mayWrite": [
+        ".devcrew/hardware/",
+        ".devcrew/system.json"
+      ],
+      "produces": [
+        ".devcrew/hardware/options.md: two to four sourced part options per block, with a recommendation",
+        ".devcrew/system.json: the recommended part on each block"
+      ]
+    },
+    {
+      "type": "agent",
+      "id": "arch",
+      "name": "Architecture reviewer",
+      "purpose": "Checks that the parts and the design fit together before you commit to them.",
+      "agent": "codex",
+      "instructions": "guide:architecture-reviewer",
+      "reads": [
+        ".devcrew/system.json",
+        ".devcrew/SYSTEM.md",
+        ".devcrew/hardware/options.md"
+      ],
+      "mayWrite": [
+        ".devcrew/arch-review.md"
+      ],
+      "produces": [
+        ".devcrew/arch-review.md: a verdict and architecture findings by severity"
+      ],
+      "verdict": {
+        "file": ".devcrew/arch-review.md",
+        "onChanges": "continue"
+      }
+    },
+    {
+      "type": "gate",
+      "id": "gate_final",
+      "title": "Approve the design",
+      "review": "design",
+      "reviseTo": "architect"
+    }
+  ],
+  "guideHashes": {
+    "system-architect": "1296f9c68f3d4709",
+    "hardware-scout": "72cb78e5f43cc7d9",
+    "architecture-reviewer": "40db2f473de4af5f"
+  }
+}

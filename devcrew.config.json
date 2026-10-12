@@ -1,0 +1,137 @@
+{
+  "$comment": "Agents are ACP adapters launched over stdio, each using its vendor CLI's own login. Roles pick an agent by name. \"provides\" says what an agent can do (web, shell); roles that need more are refused before a run starts. A profile can give any role, including a pipeline step by its id, another agent.",
+  "agents": {
+    "claude": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@agentclientprotocol/claude-agent-acp@latest"
+      ],
+      "provides": [
+        "web",
+        "shell"
+      ],
+      "note": "Claude Code. Loads your own Claude settings, skills and plugins (~/.claude), like the CLI does."
+    },
+    "claude-isolated": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@agentclientprotocol/claude-agent-acp@latest"
+      ],
+      "provides": [
+        "web",
+        "shell"
+      ],
+      "note": "Claude Code without your user-level skills, plugins, hooks and CLAUDE.md: only the run's project settings and DevCrew's instructions. Use it for fair comparisons with other vendors.",
+      "env": {
+        "ANTHROPIC_BASE_URL": "http://127.0.0.1:8787"
+      },
+      "sessionMeta": {
+        "claudeCode": {
+          "options": {
+            "settingSources": [
+              "project",
+              "local"
+            ],
+            "model": "opus"
+          }
+        }
+      }
+    },
+    "codex": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@agentclientprotocol/codex-acp@latest"
+      ],
+      "provides": [
+        "shell"
+      ],
+      "note": "Codex CLI. Web search is not assumed: give roles that need the web another agent."
+    },
+    "fake": {
+      "command": "node",
+      "args": [
+        "agents/fake-agent.mjs"
+      ],
+      "env": {
+        "FAKE_SCRIPT": "agents/scripts/cart.mjs"
+      }
+    },
+    "fake-expenses": {
+      "command": "node",
+      "args": [
+        "agents/fake-agent.mjs"
+      ],
+      "env": {
+        "FAKE_SCRIPT": "agents/scripts/expenses.mjs"
+      }
+    },
+    "fake-trouble": {
+      "command": "node",
+      "args": [
+        "agents/fake-agent.mjs"
+      ],
+      "env": {
+        "FAKE_SCRIPT": "agents/scripts/cart-trouble.mjs"
+      }
+    }
+  },
+  "profiles": {
+    "claude": {
+      "planner": "claude",
+      "qa": "claude",
+      "dev": "claude",
+      "reviewer": "claude",
+      "single": "claude"
+    },
+    "claude-isolated": {
+      "planner": "claude-isolated",
+      "qa": "claude-isolated",
+      "dev": "claude-isolated",
+      "reviewer": "claude-isolated",
+      "single": "claude-isolated"
+    },
+    "cross-vendor": {
+      "planner": "claude",
+      "qa": "codex",
+      "dev": "claude",
+      "reviewer": "codex",
+      "single": "claude"
+    },
+    "fake": {
+      "planner": "fake",
+      "qa": "fake",
+      "dev": "fake",
+      "reviewer": "fake",
+      "single": "fake"
+    },
+    "fake-expenses": {
+      "planner": "fake-expenses",
+      "qa": "fake-expenses",
+      "dev": "fake-expenses",
+      "reviewer": "fake-expenses",
+      "single": "fake-expenses"
+    },
+    "fake-trouble": {
+      "planner": "fake-trouble",
+      "qa": "fake-trouble",
+      "dev": "fake-trouble",
+      "reviewer": "fake-trouble",
+      "single": "fake-trouble"
+    }
+  },
+  "defaultProfile": "claude",
+  "maxFixAttempts": 5,
+  "turnTimeoutMinutes": 30,
+  "profileNotes": {
+    "claude": "Real Claude Code agents. Uses your subscription quota.",
+    "cross-vendor": "Real agents: Claude plans and builds, Codex writes tests and reviews. Uses both quotas.",
+    "fake": "Demo, no quota. Small shopping-cart project (4 files). Use project folder bench/tasks/S-01-cart/seed.",
+    "fake-expenses": "Demo, no quota. Medium expense-splitter project (3 parts, 9 files). Ask for changes at Gate 1 to see the Planner send a second version of the architecture. Use project folder bench/tasks/M-01-expenses/seed.",
+    "fake-trouble": "Demo, no quota. Things go wrong: Dev never fixes its bug, tries to edit tests and adds a file outside the design, so the run stops for your decision. Use project folder bench/tasks/S-01-cart/seed.",
+    "claude-isolated": "Real Claude Code agents without your personal skills, plugins and CLAUDE.md. Use it for benchmarks against other vendors. Uses your subscription quota."
+  },
+  "$isolatedNote": "claude-isolated copies ANTHROPIC_BASE_URL and the model from ~/.claude/settings.json (it no longer reads that file). Update both here if you change them there."
+}

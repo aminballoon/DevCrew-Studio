@@ -1,0 +1,7 @@
+{
+  "id": "S-01-cart",
+  "size": "S",
+  "title": "Shopping cart with discounts",
+  "timeLimitMinutes": 30,
+  "gradeCommand": "node --test \"hidden-tests/**/*.test.ts\""
+}

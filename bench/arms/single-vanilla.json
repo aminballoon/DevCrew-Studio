@@ -1,0 +1,17 @@
+{
+  "id": "single-vanilla",
+  "code": "A",
+  "name": "One AI · plain prompt",
+  "summary": "What most people do today: give the whole task to one AI and let it work until it says it is done. Nobody checks its work.",
+  "agents": 1,
+  "steps": [
+    "AI gets the task",
+    "AI writes code and its own tests",
+    "Stops when the AI says it is done"
+  ],
+  "role": "baseline",
+  "color": "#94a3b8",
+  "mode": "single",
+  "process": false,
+  "profile": "claude"
+}

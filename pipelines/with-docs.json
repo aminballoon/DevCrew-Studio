@@ -1,0 +1,74 @@
+{
+  "id": "with-docs",
+  "name": "Team with a docs writer",
+  "description": "The standard team plus a docs writer who writes a short usage guide after the code passes review. The guide is advisory: it never blocks the merge.",
+  "steps": [
+    {
+      "type": "planner",
+      "id": "planner"
+    },
+    {
+      "type": "gate",
+      "id": "gate_spec",
+      "title": "Review the spec and plan",
+      "review": "plan",
+      "reviseTo": "planner"
+    },
+    {
+      "type": "qa",
+      "id": "qa"
+    },
+    {
+      "type": "build",
+      "id": "build"
+    },
+    {
+      "type": "agent",
+      "id": "reviewer",
+      "name": "Reviewer",
+      "purpose": "Gives a second opinion on the code: design, clarity and security, the things tests cannot see.",
+      "instructions": "builtin:reviewer",
+      "reads": [
+        "git diff",
+        ".devcrew/PRD.md",
+        "contracts/"
+      ],
+      "mayWrite": [
+        ".devcrew/review.md"
+      ],
+      "produces": [
+        ".devcrew/review.md: a verdict and findings by severity"
+      ],
+      "verdict": {
+        "file": ".devcrew/review.md",
+        "onChanges": "continue"
+      }
+    },
+    {
+      "type": "agent",
+      "id": "docs",
+      "name": "Docs writer",
+      "purpose": "Writes a short guide that explains how to use what was built, for the next person who picks it up.",
+      "instructions": "Write docs/USAGE.md for a developer who will use this code for the first time: what it does in two sentences, how to import or run it, three to five short examples taken from the tests, and the errors it can raise and when. Keep it under 150 lines, use the names exactly as the contracts define them, and do not describe internal details.",
+      "reads": [
+        "git diff",
+        ".devcrew/PRD.md",
+        "contracts/",
+        "tests/"
+      ],
+      "mayWrite": [
+        "docs/"
+      ],
+      "produces": [
+        "docs/USAGE.md: a short usage guide with examples"
+      ]
+    },
+    {
+      "type": "gate",
+      "id": "gate_merge",
+      "title": "Approve the merge",
+      "review": "code",
+      "reviseTo": "build"
+    }
+  ]
+}

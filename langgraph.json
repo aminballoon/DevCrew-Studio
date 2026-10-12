@@ -1,0 +1,6 @@
+{
+  "node_version": "20",
+  "graphs": {
+    "devcrew": "./src/orchestrator/graph.ts:graph"
+  }
+}

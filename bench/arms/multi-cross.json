@@ -1,0 +1,18 @@
+{
+  "id": "multi-cross",
+  "code": "C",
+  "name": "AI team · mixed vendors",
+  "summary": "Same as the AI team, but QA and Reviewer use a model from another vendor, so the checkers don't share the coder's blind spots.",
+  "agents": 4,
+  "steps": [
+    "Planner (Claude)",
+    "QA (Codex)",
+    "Dev (Claude)",
+    "System runs tests",
+    "Reviewer (Codex)"
+  ],
+  "role": "candidate",
+  "color": "#14b8a6",
+  "mode": "pipeline",
+  "profile": "cross-vendor"
+}

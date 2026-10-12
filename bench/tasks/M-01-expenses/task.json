@@ -1,0 +1,8 @@
+{
+  "id": "M-01-expenses",
+  "size": "M",
+  "title": "Shared expense splitter",
+  "timeLimitMinutes": 45,
+  "gradeCommand": "node --test \"hidden-tests/**/*.test.ts\"",
+  "fakeProfile": "fake-expenses"
+}

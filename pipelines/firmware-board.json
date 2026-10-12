@@ -1,0 +1,107 @@
+{
+  "id": "firmware-board",
+  "name": "Firmware for a custom board",
+  "description": "For firmware on a microcontroller board, for example STM32. Put the PCB layout, schematic and CubeMX .ioc file in the project folder, or just name the board in the requirement. A board researcher works out the hardware, a rig engineer sets up how the AI flashes and tests the real board, and the tests run on the hardware itself.",
+  "steps": [
+    {
+      "type": "agent",
+      "id": "board",
+      "name": "Board researcher",
+      "purpose": "Works out what is on the board and how it is wired, from the files you gave or from the internet when you only named the board.",
+      "agent": "claude",
+      "instructions": "guide:board-researcher",
+      "needs": [
+        "web"
+      ],
+      "reads": [
+        "the .ioc, schematic, PCB layout and BOM files in this workspace",
+        "the board and MCU documentation online"
+      ],
+      "mayWrite": [
+        ".devcrew/hardware/"
+      ],
+      "produces": [
+        ".devcrew/hardware/board.md: MCU, clocks, pin table, external parts, programming and serial interfaces, sources, assumptions and conflicts"
+      ]
+    },
+    {
+      "type": "agent",
+      "id": "hil",
+      "name": "HIL rig engineer",
+      "purpose": "Sets up how the AI can flash the real board, watch its serial output and run tests on it, without two runs using the same board at once.",
+      "agent": "claude",
+      "instructions": "guide:hil-rig-engineer",
+      "needs": [
+        "shell"
+      ],
+      "reads": [
+        ".devcrew/hardware/board.md",
+        "the build files in this workspace (Makefile, CMakeLists.txt, .ioc)"
+      ],
+      "mayWrite": [
+        ".devcrew/hil/"
+      ],
+      "produces": [
+        ".devcrew/hil/: rig.json, probe.sh, flash.sh, monitor.sh, run.sh with a per-board lock, and RIG.md with setup steps and the commands tests call"
+      ]
+    },
+    {
+      "type": "planner",
+      "id": "planner"
+    },
+    {
+      "type": "gate",
+      "id": "gate_spec",
+      "title": "Review the board, the test rig and the plan",
+      "review": "plan",
+      "reviseTo": "hil"
+    },
+    {
+      "type": "qa",
+      "id": "qa"
+    },
+    {
+      "type": "build",
+      "id": "build",
+      "maxAttempts": 4
+    },
+    {
+      "type": "agent",
+      "id": "firmware",
+      "name": "Firmware reviewer",
+      "purpose": "Checks the firmware against the real board and sends it back to Dev if it would misbehave on the hardware.",
+      "agent": "claude",
+      "instructions": "guide:firmware-reviewer",
+      "reads": [
+        "git diff",
+        ".devcrew/PRD.md",
+        ".devcrew/hardware/board.md",
+        ".devcrew/hil/RIG.md",
+        "contracts/"
+      ],
+      "mayWrite": [
+        ".devcrew/firmware-review.md"
+      ],
+      "produces": [
+        ".devcrew/firmware-review.md: a verdict and hardware-related findings by severity"
+      ],
+      "verdict": {
+        "file": ".devcrew/firmware-review.md",
+        "onChanges": "dev",
+        "maxRounds": 2
+      }
+    },
+    {
+      "type": "gate",
+      "id": "gate_merge",
+      "title": "Approve the merge",
+      "review": "code",
+      "reviseTo": "build"
+    }
+  ],
+  "guideHashes": {
+    "board-researcher": "0444dfae6cb7c4c9",
+    "hil-rig-engineer": "c2a6a7cfd1b4fe91",
+    "firmware-reviewer": "a7f1c1ec62cc3df6"
+  }
+}

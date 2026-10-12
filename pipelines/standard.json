@@ -1,0 +1,23 @@
+{
+  "id": "standard",
+  "name": "Standard team",
+  "description": "Planner, QA, Dev with automatic test checks, and a code reviewer. You approve the plan before any code is written and the code before it is committed.",
+  "steps": [
+    { "type": "planner", "id": "planner" },
+    { "type": "gate", "id": "gate_spec", "title": "Review the spec and plan", "review": "plan", "reviseTo": "planner" },
+    { "type": "qa", "id": "qa" },
+    { "type": "build", "id": "build" },
+    {
+      "type": "agent",
+      "id": "reviewer",
+      "name": "Reviewer",
+      "purpose": "Gives a second opinion on the code: design, clarity and security, the things tests cannot see.",
+      "instructions": "builtin:reviewer",
+      "reads": ["git diff", ".devcrew/PRD.md", "contracts/"],
+      "mayWrite": [".devcrew/review.md"],
+      "produces": [".devcrew/review.md: a verdict and findings by severity"],
+      "verdict": { "file": ".devcrew/review.md", "onChanges": "continue" }
+    },
+    { "type": "gate", "id": "gate_merge", "title": "Approve the merge", "review": "code", "reviseTo": "build" }
+  ]
+}
