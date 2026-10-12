@@ -75,8 +75,11 @@ export async function verify(opts: {
 }): Promise<VerifyResult> {
   const reasons: string[] = [];
 
+  // Every file QA handed over must be unchanged and present. New files under tests/ are build
+  // output of the test command itself (a compiled test binary, a cache): agents cannot create
+  // them, because the scope guard reverts any file an agent adds there after its turn.
   const now = hashFiles(opts.workspace, LOCKED_PREFIXES);
-  const tampered = Object.keys({ ...opts.baseline.hashes, ...now }).filter(p => now[p] !== opts.baseline.hashes[p]);
+  const tampered = Object.keys(opts.baseline.hashes).filter(p => now[p] !== opts.baseline.hashes[p]);
   if (tampered.length) { reasons.push(`Locked files changed: ${tampered.join(', ')}`); }
 
   const run = await runCommand(opts.testCommand, opts.workspace);

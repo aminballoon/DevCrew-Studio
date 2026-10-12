@@ -94,6 +94,20 @@ export class RunManager {
     this.drive(runId, def, new Command({ resume: answer }));
   }
 
+  /**
+   * Continue a run whose process stopped mid-way (closed terminal, crash, killed on purpose),
+   * from the last step it finished. The step that was interrupted runs again from its start.
+   */
+  async resume(runId: string): Promise<void> {
+    await this.active.get(runId);
+    const def = this.pipelineOf(runId);
+    const state = await this.graphFor(def).getState(this.config(runId));
+    if (state.tasks.some(t => t.interrupts.length)) { throw new Error('Run is waiting at a gate: answer the gate instead'); }
+    if (!state.next.length) { throw new Error(state.values && Object.keys(state.values).length ? 'Run has already finished' : `No saved progress for run ${runId}`); }
+    getBus().emit(runId, { type: 'log', level: 'info', message: `Resumed at ${state.next.join(', ')}.` });
+    this.drive(runId, def, null);
+  }
+
   /** Resolves with the final status (used by the benchmark runner). */
   waitFor(runId: string): Promise<string> {
     return new Promise(resolve => this.finished.set(runId, resolve));

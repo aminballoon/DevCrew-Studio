@@ -8,6 +8,7 @@ import { getBus } from './orchestrator/runtime';
 const USAGE = `Usage:
   npm run run -- start --requirement <file> [--source <dir>] [--profile <name>] [--pipeline <id>] [--auto]
   npm run run -- gate <runId> <approve|revise|retry|replan|abort> [--feedback <text>]
+  npm run run -- resume <runId>     continue a run whose process stopped mid-way
   npm run run -- list
 
 Gates wait for an answer; the dashboard (npm run dashboard) is the easier way to give one.`;
@@ -59,6 +60,10 @@ async function main(): Promise<void> {
       autoApprove: values.auto,
     });
     console.log(`Run ${runId}`);
+  } else if (cmd === 'resume' && rest.length === 1) {
+    getBus().subscribe(print);
+    runId = rest[0];
+    await runs.resume(runId);
   } else if (cmd === 'gate' && rest.length === 2) {
     getBus().subscribe(print);
     runId = rest[0];

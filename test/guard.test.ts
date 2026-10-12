@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -82,6 +82,19 @@ test('verify fails when locked tests were changed, even if everything passes', a
   const r = await verify({ workspace: ws, testCommand: 'node --test', baseline });
   assert.equal(r.passed, false);
   assert.match(r.reasons.join(), /Locked files changed: tests\/sum.test.ts/);
+});
+
+test('verify ignores build output the test command leaves in tests/, but not a deleted test', async () => {
+  const ws = workspace({ 'tests/sum.test.ts': SUM_TEST, 'src/sum.ts': 'export const sum = (a: number, b: number) => a + b;\n' });
+  const baseline = captureBaseline(ws);
+  // A compiled test binary written next to its source, as a C Makefile does
+  writeFileSync(join(ws, 'tests/sum.bin'), Buffer.from([0x7f, 0x45, 0x4c, 0x46]));
+  const r = await verify({ workspace: ws, testCommand: 'node --test', baseline });
+  assert.equal(r.passed, true, r.reasons.join('; '));
+
+  unlinkSync(join(ws, 'tests/sum.test.ts'));
+  const gone = await verify({ workspace: ws, testCommand: 'node --test', baseline });
+  assert.match(gone.reasons.join(), /Locked files changed: tests\/sum.test.ts/);
 });
 
 test('verify ignores FORCE_COLOR in the environment', async () => {

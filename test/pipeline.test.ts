@@ -200,3 +200,13 @@ test('a design pipeline shows the system diagram, sends feedback back to the arc
   const stages = getBus().read(runId).flatMap(e => (e.type === 'node_started' ? [e.node] : []));
   assert.ok(!stages.some(s => ['planner', 'qa', 'dev', 'verify'].includes(s)));
 });
+
+test('resume refuses a run that waits at a gate or has finished', { timeout: 60_000 }, async () => {
+  const runs = new RunManager();
+  const runId = runs.start({ requirement: 'cart', source: join(TASK, 'seed'), profile: 'fake' });
+  await waitForGate(runId);
+  await assert.rejects(runs.resume(runId), /waiting at a gate/);
+  await runs.resolveGate(runId, { decision: 'abort' });
+  await runs.waitFor(runId);
+  await assert.rejects(runs.resume(runId), /already finished/);
+});
