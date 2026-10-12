@@ -422,6 +422,49 @@ const KIND_WRITER = { contract: 'planner', doc: 'planner', source: 'dev', config
 const KIND_ORDER = { contract: 0, config: 1, source: 2, doc: 3, test: 4 };
 
 /** The architecture from the latest plan.json the Planner handed over. */
+/** Acceptance criteria in a PRD: "AC-3" → the rest of its line, without markdown emphasis. */
+function prdCriteria(prd) {
+  const out = new Map();
+  for (const line of (prd ?? '').split('\n')) {
+    const m = line.match(/\b(AC-\d+)\b\**\s*[:.)—–-]?\s*\**\s*(.*)$/);
+    if (m && !out.has(m[1])) out.set(m[1], m[2].replace(/[*_`]/g, '').trim());
+  }
+  return out;
+}
+
+/** Each requirement clause with the criteria the Planner says cover it (runs from before clauses have none). */
+function coverageRows(payload) {
+  const clauses = payload.clauses ?? [];
+  const coverage = payload.plan?.coverage ?? {};
+  const criteria = prdCriteria(payload.prd);
+  const rows = clauses.map(c => ({ ...c, acs: (coverage[c.id] ?? []).map(id => ({ id, text: criteria.get(id), known: criteria.has(id) })) }));
+  const linked = new Set(rows.flatMap(r => r.acs.map(a => a.id)));
+  const extra = [...criteria].filter(([id]) => !linked.has(id)).map(([id, text]) => ({ id, text }));
+  return { rows, extra, covered: rows.filter(r => r.acs.some(a => a.known)).length };
+}
+
+function coverageButton(payload) {
+  if (!payload.clauses?.length) return '';
+  const { rows, covered } = coverageRows(payload);
+  return `<button type="button" data-pane="coverage">Requirement coverage (${covered}/${rows.length})</button>`;
+}
+
+function coveragePane(payload) {
+  if (!payload.clauses?.length) return '';
+  const { rows, extra, covered } = coverageRows(payload);
+  const chip = a => `<span class="chip ${a.known ? '' : 'bad'}" title="${esc(a.known ? a.text : 'Not found in the spec')}">${esc(a.id)}</span>`;
+  return `<div data-pane="coverage" hidden>
+    <p class="hint">Your requirement, split into its sentences, and the acceptance criteria in the spec that cover each one. QA tests these criteria, and every role also gets your sentences as the final word. Check that each criterion says everything its sentence says; hover a criterion to read it.</p>
+    ${covered < rows.length ? `<div class="banner warn">${plural(rows.length - covered, 'sentence')} of your requirement ${rows.length - covered === 1 ? 'is' : 'are'} not covered by the spec.</div>` : ''}
+    <div class="table-wrap"><table class="results coverage-table">
+      <thead><tr><th>#</th><th>Your requirement</th><th>Covered by</th></tr></thead>
+      <tbody>${rows.map(r => `<tr class="${r.acs.some(a => a.known) ? '' : 'uncovered'}"><td>${esc(r.id)}</td><td class="wrap">${r.text.includes('\n') ? `<pre>${esc(r.text)}</pre>` : esc(r.text)}</td><td class="acs">${r.acs.length ? r.acs.map(chip).join(' ') : '<span class="chip bad">None</span>'}</td></tr>`).join('')}</tbody>
+    </table></div>
+    ${extra.length ? `<h4 style="margin-top:14px">Added by the Planner (${extra.length})</h4><p class="hint">Criteria in the spec that no sentence of your requirement asks for. They can be sensible details or scope you did not ask for.</p>
+      <ul class="coverage-extra">${extra.map(a => `<li><span class="chip">${esc(a.id)}</span> ${esc(a.text)}</li>`).join('')}</ul>` : ''}
+  </div>`;
+}
+
 function plannedArchitecture() {
   const versions = archVersions();
   return (versions.find(x => x.version === S.archVersion) ?? versions.at(-1))?.files ?? null;
@@ -1104,8 +1147,9 @@ function renderGate(m) {
     const plan = payload.plan;
     body = `${payload.specIssue ? `<div class="banner warn">Dev reported a problem with the spec: ${esc(payload.specIssue)}</div>` : ''}
       <p class="gate-ask">The Planner has written the spec and designed every file to build. Nothing has been built yet. If you approve, QA writes tests and Dev builds exactly these files; anything outside this design will be flagged.</p>
-      <div class="subtabs" id="spec-tabs"><button type="button" class="on" data-pane="arch">Architecture (${plural(plan?.architecture?.length ?? 0, 'file')})</button><button type="button" data-pane="prd">Spec (PRD)</button><button type="button" data-pane="parts">Parts and build order</button>${reportButtons(payload.reports)}</div>
+      <div class="subtabs" id="spec-tabs"><button type="button" class="on" data-pane="arch">Architecture (${plural(plan?.architecture?.length ?? 0, 'file')})</button>${coverageButton(payload)}<button type="button" data-pane="prd">Spec (PRD)</button><button type="button" data-pane="parts">Parts and build order</button>${reportButtons(payload.reports)}</div>
       <div data-pane="arch">${(() => { const vs = archVersions(); const v = vs.at(-1); const prev = v && vs[v.version - 2]; return (v ? diffBanner(v, prev) : '') + renderArch(plan?.architecture, null, plan, v ? archDiff(prev, v) : null); })()}</div>
+      ${coveragePane(payload)}
       <div data-pane="prd" hidden><div class="doc">${payload.prd ? md(payload.prd) : '<p class="hint">No PRD written</p>'}</div></div>
       <div data-pane="parts" hidden><h4>Work split into ${plural(plan?.modules?.length ?? 0, 'part')} (Dev builds them in this order)</h4>
         <ul class="module-list">${(plan?.modules ?? []).map((x, i) => `<li><span class="id">${i + 1}. ${esc(x.id)}</span> — ${esc(x.title)}<div class="desc">${esc(x.description)}</div></li>`).join('')}</ul>

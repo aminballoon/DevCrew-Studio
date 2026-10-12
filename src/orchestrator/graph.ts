@@ -260,6 +260,7 @@ const gateNode = (def: PipelineDef, step: GateStep) => async (s: S): Promise<U> 
     payload = {
       prd: readText(s.workspace!.path, '.devcrew/PRD.md'),
       plan: s.plan,
+      clauses: requirementClauses(s.requirement),
       contracts: diffSince(s.workspace!).files.filter(f => f.path.startsWith('contracts/')).map(f => f.path),
       specIssue: s.specIssue,
       reports,

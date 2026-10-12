@@ -8,6 +8,7 @@ Found in the L-01 pilot: QA, Dev and the reviewers never saw the customer's requ
 - The Planner must map every clause to acceptance criteria in `plan.json` `coverage`; a clause with no criterion, or a criterion missing from PRD.md, sends the plan back (now two fix turns before the run fails).
 - QA, Dev and every reviewer get the clauses as the source of truth ("where PRD.md says less, follow the requirement"). Reviewers that can send work back must answer `VERDICT: changes` for code that misses a clause, whatever its severity.
 - Draft `pipelines/drafts/with-security.json`, waiting for your review: the Reviewer sends work back to Dev once (it only reported before), and the security reviewer may also send back requirement gaps.
+- Gate 1 has a **Requirement coverage** tab: each sentence of your requirement with the acceptance criteria that cover it (hover one to read it), a warning for uncovered sentences, and the criteria the Planner added that no sentence asks for. Checked in the browser on a demo run, wide and at 375 px. Runs from before this change do not show the tab.
 - The fake agent adds a coverage map to its scripted plans.
 - Tests: 41 (clause splitting, coverage validation).
 - Benchmark runs made before this change are "v1"; the prompts hash in each result tells them apart.

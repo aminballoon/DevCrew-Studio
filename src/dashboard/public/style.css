@@ -497,6 +497,16 @@ dialog label.check input { width: auto; }
 .arch-legend .ln.tests { border-top: 2px dotted var(--qa); }
 .sw.k-contract { background: var(--planner); } .sw.k-source { background: var(--dev); } .sw.k-test { background: var(--qa); } .sw.k-config { background: var(--muted); }
 .arch-table { margin-top: 10px; }
+.coverage-table td.wrap { white-space: normal; min-width: 260px; line-height: 1.45; }
+.coverage-table td.wrap pre { margin: 0; white-space: pre-wrap; font-size: 11.5px; }
+.coverage-table td.acs { white-space: normal; min-width: 90px; }
+.coverage-table td.acs .chip { margin: 1px 0; }
+.coverage-table tr.uncovered td { background: var(--bad-soft); }
+@media (max-width: 600px) {
+  .coverage-table td.wrap { min-width: 0; }
+  .coverage-table td.acs { min-width: 64px; }
+}
+.coverage-extra { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; line-height: 1.6; }
 .arch-table td.wrap { white-space: normal; min-width: 260px; }
 
 .proposal { margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 10px; }
