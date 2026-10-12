@@ -120,56 +120,89 @@ console.log(`Suite ${suite}: ${matrix.length} runs (${tasks.length} tasks × ${a
 const config = readFileSync(join(STUDIO_ROOT, 'devcrew.config.json'), 'utf8');
 const prompts = readFileSync(join(STUDIO_ROOT, 'src/orchestrator/prompts.ts'), 'utf8');
 
+/** Why a run stopped, when the vendor ran out of quota or rate-limited it; such a run says nothing about the arm. */
+const QUOTA = /quota|rate[ -]?limit|\b429\b|resource[ _]exhausted|usage limit|too many requests|exceeded your|out of credits/i;
+function quotaHit(events: DevcrewEvent[]): string | null {
+  for (const e of events) {
+    const text = e.type === 'run_finished' && e.status === 'failed' ? e.error ?? '' : e.type === 'log' && e.level === 'error' ? e.message : '';
+    const m = text.match(QUOTA);
+    if (m) { return text.split('\n').find(l => QUOTA.test(l))?.trim().slice(0, 160) ?? m[0]; }
+  }
+  return null;
+}
+/** A saved result that only failed for quota is run again. */
+function savedAndValid(file: string): boolean {
+  if (!existsSync(file)) { return false; }
+  const r = JSON.parse(readFileSync(file, 'utf8')) as { resolved?: boolean; runId?: string; quotaLimited?: string };
+  if (r.quotaLimited) { return false; }
+  return r.resolved || !r.runId || !quotaHit(getBus().read(r.runId));
+}
+const QUOTA_WAIT_MIN = Number(process.env.BENCH_QUOTA_WAIT_MIN ?? 20);
+const QUOTA_MAX_WAIT_MIN = Number(process.env.BENCH_QUOTA_MAX_WAIT_MIN ?? 12 * 60);
+
 for (const [i, { task, arm, rep }] of matrix.entries()) {
   const file = join(outDir, `${task.id}__${arm.id}__r${rep}.json`);
-  if (existsSync(file)) { console.log(`[${i + 1}/${matrix.length}] ${task.id} ${arm.id} #${rep}: already done`); continue; }
-  // Each task has its own script for the fake agent
-  const profile = values.profile === 'fake' && task.fakeProfile ? task.fakeProfile : values.profile ?? arm.profile;
-  const requirement = readFileSync(join(BENCH, 'tasks', task.id, 'requirement.md'), 'utf8');
-  const seed = join(BENCH, 'tasks', task.id, 'seed');
-  const label = `bench ${task.id} · ${arm.id} #${rep}`;
-  process.stdout.write(`[${i + 1}/${matrix.length}] ${task.id} ${arm.id} #${rep} … `);
+  if (savedAndValid(file)) { console.log(`[${i + 1}/${matrix.length}] ${task.id} ${arm.id} #${rep}: already done`); continue; }
+  let waitedMin = 0;
+  retry: for (;;) {
+    // Each task has its own script for the fake agent
+    const profile = values.profile === 'fake' && task.fakeProfile ? task.fakeProfile : values.profile ?? arm.profile;
+    const requirement = readFileSync(join(BENCH, 'tasks', task.id, 'requirement.md'), 'utf8');
+    const seed = join(BENCH, 'tasks', task.id, 'seed');
+    const label = `bench ${task.id} · ${arm.id} #${rep}`;
+    process.stdout.write(`[${i + 1}/${matrix.length}] ${task.id} ${arm.id} #${rep} … `);
 
-  // Past the time limit the agents are stopped and the run counts as failed
-  let runId: string | undefined;
-  let timer: NodeJS.Timeout | undefined;
-  const deadline = new Promise<'timeout'>(resolve => {
-    timer = setTimeout(() => {
-      if (runId) {
-        closeSessions(runId);
-        getBus().emit(runId, { type: 'run_finished', status: 'failed', error: `Time limit of ${task.timeLimitMinutes} min reached` });
-      }
-      resolve('timeout');
-    }, task.timeLimitMinutes * 60_000);
-  });
+    // Past the time limit the agents are stopped and the run counts as failed
+    let runId: string | undefined;
+    let timer: NodeJS.Timeout | undefined;
+    const deadline = new Promise<'timeout'>(resolve => {
+      timer = setTimeout(() => {
+        if (runId) {
+          closeSessions(runId);
+          getBus().emit(runId, { type: 'run_finished', status: 'failed', error: `Time limit of ${task.timeLimitMinutes} min reached` });
+        }
+        resolve('timeout');
+      }, task.timeLimitMinutes * 60_000);
+    });
 
-  let status: string;
-  if (arm.mode === 'pipeline') {
-    runId = runs.start({ requirement, source: seed, profile, autoApprove: true, label, pipeline: arm.pipeline });
-    status = await Promise.race([runs.waitFor(runId), deadline]);
-  } else {
-    runId = `${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${Math.random().toString(16).slice(2, 8)}`;
-    const guides = arm.guides?.map(g => `## ${g}\n\n${readFileSync(guidePath(g), 'utf8').trim()}`).join('\n\n');
-    const single = runSingle({ requirement, source: seed, profile, process: !!arm.process, guides, label, runId });
-    status = await Promise.race([single.then(r => r.status), deadline]);
+    let status: string;
+    if (arm.mode === 'pipeline') {
+      runId = runs.start({ requirement, source: seed, profile, autoApprove: true, label, pipeline: arm.pipeline });
+      status = await Promise.race([runs.waitFor(runId), deadline]);
+    } else {
+      runId = `${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${Math.random().toString(16).slice(2, 8)}`;
+      const guides = arm.guides?.map(g => `## ${g}\n\n${readFileSync(guidePath(g), 'utf8').trim()}`).join('\n\n');
+      const single = runSingle({ requirement, source: seed, profile, process: !!arm.process, guides, label, runId });
+      status = await Promise.race([single.then(r => r.status), deadline]);
+    }
+    clearTimeout(timer);
+    // Out of quota: wait for it to come back and run the same cell again from scratch
+    const quota = quotaHit(getBus().read(runId));
+    if (quota && waitedMin < QUOTA_MAX_WAIT_MIN) {
+      console.log(`stopped by the vendor (${quota}); waiting ${QUOTA_WAIT_MIN} min, then running it again`);
+      await new Promise(r => setTimeout(r, QUOTA_WAIT_MIN * 60_000));
+      waitedMin += QUOTA_WAIT_MIN;
+      continue retry;
+    }
+    const started = getBus().read(runId).find(e => e.type === 'run_started');
+    const workspace = started?.type === 'run_started' ? started.workspace : '';
+
+    const g = workspace ? await grade(task, workspace) : { hidden: { total: 0, pass: 0, fail: 0, skipped: 0, declared: 0 }, resolved: false, output: '' };
+    const p = workspace && g.hidden.pass > 0 ? await perf(task, workspace) : undefined;
+    const m = metrics(getBus().read(runId));
+    const result = {
+      task: task.id, size: task.size, arm: arm.id, rep, profile, runId, status,
+      resolved: g.resolved, hidden: g.hidden, regression: 'regression' in g ? g.regression : undefined,
+      ...m,
+      perf: p,
+      quotaLimited: quota ?? undefined,
+      meta: { finishedAt: new Date().toISOString(), configHash: sha(config), promptsHash: sha(prompts), node: process.version },
+      gradeOutput: g.output,
+    };
+    writeFileSync(file, JSON.stringify(result, null, 2));
+    console.log(`${g.resolved ? 'RESOLVED' : 'unresolved'} · hidden ${g.hidden.pass}/${g.hidden.total} · ${m.tokens.total.toLocaleString()} tokens · $${m.costUsd.toFixed(2)} · ${Math.round(m.wallMs / 1000)}s${p ? ` · perf ${JSON.stringify(p)}` : ''}`);
+    break;
   }
-  clearTimeout(timer);
-  const started = getBus().read(runId).find(e => e.type === 'run_started');
-  const workspace = started?.type === 'run_started' ? started.workspace : '';
-
-  const g = workspace ? await grade(task, workspace) : { hidden: { total: 0, pass: 0, fail: 0, skipped: 0, declared: 0 }, resolved: false, output: '' };
-  const p = workspace && g.hidden.pass > 0 ? await perf(task, workspace) : undefined;
-  const m = metrics(getBus().read(runId));
-  const result = {
-    task: task.id, size: task.size, arm: arm.id, rep, profile, runId, status,
-    resolved: g.resolved, hidden: g.hidden, regression: 'regression' in g ? g.regression : undefined,
-    ...m,
-    perf: p,
-    meta: { finishedAt: new Date().toISOString(), configHash: sha(config), promptsHash: sha(prompts), node: process.version },
-    gradeOutput: g.output,
-  };
-  writeFileSync(file, JSON.stringify(result, null, 2));
-  console.log(`${g.resolved ? 'RESOLVED' : 'unresolved'} · hidden ${g.hidden.pass}/${g.hidden.total} · ${m.tokens.total.toLocaleString()} tokens · $${m.costUsd.toFixed(2)} · ${Math.round(m.wallMs / 1000)}s${p ? ` · perf ${JSON.stringify(p)}` : ''}`);
 }
 
 console.log(`\nResults in bench/results/${suite}. Open the dashboard's Benchmark tab to compare arms.`);
