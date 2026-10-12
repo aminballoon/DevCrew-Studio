@@ -3,7 +3,8 @@
 The know-how of a pipeline role: what to do, what to write, and the rules to follow. A pipeline
 step uses one with `"instructions": "guide:<name>"` (this folder, `<name>.md`). DevCrew puts the
 guide's text in the role's instructions, so it works the same with any AI vendor; it is not a
-Claude skill. Several pipelines can share a guide.
+Claude skill. Several pipelines can share a guide. The built-in Planner, QA and build steps can also take one
+with `"guide": "guide:<name>"`; it is added on top of DevCrew's own instructions for that role.
 
 | Guide | Used by |
 |---|---|
@@ -14,6 +15,11 @@ Claude skill. Several pipelines can share a guide.
 | [system-architect](system-architect.md) | system-integration |
 | [hardware-scout](hardware-scout.md) | system-integration |
 | [architecture-reviewer](architecture-reviewer.md) | system-integration |
+| [risk-planner](risk-planner.md) | minimal-skills, with-security-skills (Planner) |
+| [test-engineer](test-engineer.md) | minimal-skills, with-security-skills (QA) |
+| [careful-developer](careful-developer.md) | minimal-skills, with-security-skills (Dev) |
+| [security-auditor](security-auditor.md) | with-security-skills |
+| [requirement-reviewer](requirement-reviewer.md) | with-security-skills |
 
 **Changing a guide changes every pipeline that uses it**, so approved pipelines are tied to the
 guide versions you approved. After you edit a guide, those pipelines show a problem and cannot be

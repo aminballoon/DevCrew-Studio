@@ -4,7 +4,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { STUDIO_ROOT } from '../src/core/config';
-import { validatePipeline, type PipelineDef } from '../src/pipeline/schema';
+import { guidesOf, PIPELINES_DIR, validatePipeline, withGuides, type PipelineDef } from '../src/pipeline/schema';
 
 const read = (id: string) => JSON.parse(readFileSync(join(STUDIO_ROOT, 'pipelines', `${id}.json`), 'utf8')) as PipelineDef;
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x));
@@ -164,4 +164,15 @@ test('a run is refused when a role needs something its agent cannot do', async (
   assert.deepEqual(checkCapabilities(cfg, 'mixed', def), { errors: [], warnings: [] });
   assert.match(checkCapabilities(cfg, 'other', def).warnings.join(), /does not say whether it can/);
   assert.deepEqual(checkCapabilities(cfg, 'fake', def).errors, []);
+});
+
+test('built-in steps can add a role guide; a missing guide is a problem', () => {
+  const base = JSON.parse(readFileSync(join(PIPELINES_DIR, 'minimal.json'), 'utf8'));
+  const withGuide = { ...base, id: 'guided', steps: base.steps.map((s: { type: string }) => (s.type === 'qa' ? { ...s, guide: 'guide:test-engineer' } : s)) };
+  assert.deepEqual(validatePipeline(withGuide), []);
+  assert.deepEqual(guidesOf(withGuide), ['test-engineer']);
+  const qa = withGuides(withGuide).steps.find(s => s.type === 'qa') as { guideText?: string };
+  assert.match(qa.guideText ?? '', /^# Test engineer/);
+  const missing = { ...withGuide, steps: withGuide.steps.map((s: { type: string }) => (s.type === 'qa' ? { ...s, guide: 'guide:no-such-guide' } : s)) };
+  assert.match(validatePipeline(missing).join(' '), /no role guide pipelines\/roles\/no-such-guide\.md/);
 });

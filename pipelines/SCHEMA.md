@@ -117,7 +117,9 @@ changed to make tests pass.
 
 `pipelines/roles/<name>.md` holds a role's know-how in plain English. A step uses it with
 `"instructions": "guide:<name>"`; DevCrew puts the text in the role's prompt, so it works the same
-with every vendor. Approving a pipeline records the version of each guide it uses
+with every vendor. The built-in `planner`, `qa` and `build` steps keep DevCrew's own instructions
+and can add a guide on top with `"guide": "guide:<name>"` (for example a test engineer's techniques
+for QA). Approving a pipeline records the version of each guide it uses
 (`guideHashes`, written for you). If a guide changes afterwards, the pipeline shows a problem and
 cannot run until you review it again. A run keeps the guide text it started with.
 

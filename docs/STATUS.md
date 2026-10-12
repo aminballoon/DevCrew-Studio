@@ -2,6 +2,15 @@
 
 อัปเดตล่าสุด: 2026-10-12
 
+## Latest changes (2026-10-12, v3: roles with specialist skills; branch `pipeline-role-skills`)
+Built on v2. Each role gets know-how and tools a plain prompt does not give it, so "different skills per role" can be measured.
+- The built-in Planner, QA and build steps can take a role guide on top of DevCrew's instructions (`"guide": "guide:<name>"`); validated, recorded at approval like other guides, shown in the plain-words description.
+- Five new guides in `pipelines/roles/`: `risk-planner` (risks → criteria, a benchmark check when speed is asked for), `test-engineer` (boundaries, seeded property tests, hostile input, concurrency, isolation, returned-copy tests), `careful-developer` (validate at the boundary, no check-then-act races, copies at the edges, no panics, measure before optimising), `security-auditor` (Semgrep `p/default` plus a hand checklist), `requirement-reviewer` (a clause-by-clause table).
+- Drafts waiting for your review: `minimal-skills`, `with-security-skills`.
+- Bench arms: `multi-minimal-skills` (DS), `multi-security-skills` (ES) and the control `single-skills` (AS): one agent given every guide, to tell the know-how apart from the splitting. Single arms can now take `guides`.
+- Semgrep 1.179.0 installed with Homebrew; `p/default` runs 210 rules on a TypeScript file in under 3 s without a login.
+- Tests: 42.
+
 ## Latest changes (2026-10-12, requirement clauses for every role; branch `pipeline-findings-loop`)
 Found in the L-01 pilot: QA, Dev and the reviewers never saw the customer's requirement, only the Planner's PRD, so a detail the Planner dropped ("store the title trimmed") could not be caught, and reviewers that did notice it still approved.
 - The requirement is split into numbered clauses (R-1, R-2, ...; sentences, table rows, code blocks) in `src/orchestrator/requirement.ts`.
@@ -12,6 +21,7 @@ Found in the L-01 pilot: QA, Dev and the reviewers never saw the customer's requ
 - The fake agent adds a coverage map to its scripted plans.
 - Tests: 41 (clause splitting, coverage validation).
 - Benchmark runs made before this change are "v1"; the prompts hash in each result tells them apart.
+- Fixed: the single-agent prompt told arm A to write tests "runnable with node --test" on every task, the Rust task included. Now it says to use the project's own test tool. The v1 result of arm A on L-04 used the old wording and must be rerun.
 
 ## Latest changes (2026-10-12, Antigravity agent)
 - New agent `agy` and profile `agy`: Antigravity CLI through `google-antigravity-acp@2.0.1` (third-party, MIT, the same adapter vscode-acp uses), model `gemini-3.8-flash-high`. The profile maps every role to agy, including the `security` step of `with-security` (which names codex otherwise).

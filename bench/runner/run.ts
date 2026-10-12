@@ -9,6 +9,7 @@ import { countDeclaredTests, parseTestCounts, runCommand } from '../../src/guard
 import { RunManager } from '../../src/orchestrator/RunManager';
 import { closeSessions, getBus } from '../../src/orchestrator/runtime';
 import { runSingle } from '../../src/orchestrator/single';
+import { guidePath } from '../../src/pipeline/schema';
 
 interface Task {
   id: string; size: string; title: string; timeLimitMinutes: number; gradeCommand: string; regressionCommand?: string;
@@ -17,7 +18,13 @@ interface Task {
   /** Scripted agent profile that fits this task, used when running with --profile fake. */
   fakeProfile?: string;
 }
-interface Arm { id: string; mode: 'single' | 'pipeline'; process?: boolean; profile: string; /** Approved pipeline id (default standard). */ pipeline?: string }
+interface Arm {
+  id: string; mode: 'single' | 'pipeline'; process?: boolean; profile: string;
+  /** Approved pipeline id (default standard). */
+  pipeline?: string;
+  /** Single arms only: role guides (pipelines/roles/<name>.md) given to the one agent. */
+  guides?: string[];
+}
 
 const BENCH = join(STUDIO_ROOT, 'bench');
 const USAGE = `Usage: npm run bench -- --tasks <id,...|all> --arms <id,...> [--reps N] [--profile name] [--suite name]
@@ -142,7 +149,8 @@ for (const [i, { task, arm, rep }] of matrix.entries()) {
     status = await Promise.race([runs.waitFor(runId), deadline]);
   } else {
     runId = `${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${Math.random().toString(16).slice(2, 8)}`;
-    const single = runSingle({ requirement, source: seed, profile, process: !!arm.process, label, runId });
+    const guides = arm.guides?.map(g => `## ${g}\n\n${readFileSync(guidePath(g), 'utf8').trim()}`).join('\n\n');
+    const single = runSingle({ requirement, source: seed, profile, process: !!arm.process, guides, label, runId });
     status = await Promise.race([single.then(r => r.status), deadline]);
   }
   clearTimeout(timer);

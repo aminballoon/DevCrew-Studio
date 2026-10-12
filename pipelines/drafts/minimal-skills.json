@@ -1,0 +1,36 @@
+{
+  "id": "minimal-skills",
+  "name": "Minimal team with role skills",
+  "description": "Planner, QA and Dev with automatic test checks, each with a specialist guide: the Planner plans around risks, QA uses boundary, property, hostile-input and concurrency tests, Dev follows defensive coding rules. No code reviewer.",
+  "steps": [
+    {
+      "type": "planner",
+      "id": "planner",
+      "guide": "guide:risk-planner"
+    },
+    {
+      "type": "gate",
+      "id": "gate_spec",
+      "title": "Review the spec and plan",
+      "review": "plan",
+      "reviseTo": "planner"
+    },
+    {
+      "type": "qa",
+      "id": "qa",
+      "guide": "guide:test-engineer"
+    },
+    {
+      "type": "build",
+      "id": "build",
+      "guide": "guide:careful-developer"
+    },
+    {
+      "type": "gate",
+      "id": "gate_merge",
+      "title": "Approve the merge",
+      "review": "code",
+      "reviseTo": "build"
+    }
+  ]
+}

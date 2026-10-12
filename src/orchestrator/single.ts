@@ -10,6 +10,8 @@ export interface SingleRunOptions {
   profile: string;
   /** Arm A+: the same process as the pipeline, in one agent, with the same external fix loop. */
   process: boolean;
+  /** Role guide texts for a control arm that gets the team's know-how in one agent. */
+  guides?: string;
   label?: string;
   runId?: string;
 }
@@ -27,7 +29,7 @@ export async function runSingle(opts: SingleRunOptions): Promise<{ runId: string
   const ctx = { runId, profile: opts.profile, workspace: ws.path, role: 'single' as const, io: { from: ['You: the task'], reads: [], to } };
   try {
     bus.emit(runId, { type: 'node_started', node: 'single', attempt: 1 });
-    await agentTurn(ctx, singlePrompt(opts.requirement, opts.process));
+    await agentTurn(ctx, singlePrompt(opts.requirement, opts.process, opts.guides));
     bus.emit(runId, { type: 'node_finished', node: 'single' });
 
     if (opts.process) {

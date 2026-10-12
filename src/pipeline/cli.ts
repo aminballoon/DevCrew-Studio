@@ -22,12 +22,16 @@ const GATE_SHOWS = {
 export function describe(def: PipelineDef): string {
   const name = (s: Step | undefined) => !s ? 'the end of the run'
     : s.type === 'gate' ? `you (${s.title})` : s.type === 'agent' ? s.name : s.type === 'build' ? 'Dev' : s.type === 'qa' ? 'QA' : 'the Planner';
+  const withGuide = (s: Step) => {
+    const g = 'guide' in s ? guideName(s.guide) : null;
+    return g ? ` Also follows the role guide pipelines/roles/${g}.md.` : '';
+  };
   const lines = def.steps.map((s, i) => {
     const n = `${i + 1}.`.padEnd(4);
     switch (s.type) {
-      case 'planner': return `${n}Planner: reads your request, writes the spec and designs every file. Writes .devcrew/ and contracts/.`;
-      case 'qa': return `${n}QA: writes tests from the spec before any code exists. Writes tests/ (locked afterwards).`;
-      case 'build': return `${n}Dev + Verify: Dev builds one part at a time; the system runs the tests after each try. Up to ${s.maxAttempts ?? 'the configured number of'} tries per part, then you decide.`;
+      case 'planner': return `${n}Planner: reads your request, writes the spec and designs every file. Writes .devcrew/ and contracts/.${withGuide(s)}`;
+      case 'qa': return `${n}QA: writes tests from the spec before any code exists. Writes tests/ (locked afterwards).${withGuide(s)}`;
+      case 'build': return `${n}Dev + Verify: Dev builds one part at a time; the system runs the tests after each try. Up to ${s.maxAttempts ?? 'the configured number of'} tries per part, then you decide.${withGuide(s)}`;
       case 'gate': return `${n}You review the ${GATE_SHOWS[s.review]} ("${s.title}"). Approve to continue${i === def.steps.length - 1 ? ' and commit' : ''}, or ask for changes to send it back to ${name(def.steps.find(x => x.id === s.reviseTo))}.`;
       case 'agent': {
         const back = s.verdict?.onChanges === 'dev' ? ` If it finds problems it sends the code back to Dev (at most ${s.verdict.maxRounds ?? 1} time${(s.verdict.maxRounds ?? 1) === 1 ? '' : 's'}).` : '';

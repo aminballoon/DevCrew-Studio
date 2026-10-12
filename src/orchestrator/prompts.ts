@@ -133,11 +133,14 @@ Write your review to .devcrew/review.md (the only file you may write). Its first
 "VERDICT: approve" or "VERDICT: changes", followed by findings ordered by severity, each with file:line.`;
 }
 
-export function singlePrompt(requirement: string, process: boolean): string {
+/** Role guides handed to a single agent, so a control arm gets the same know-how as the team. */
+const singleGuides = (guides?: string) => (guides ? `\nYou do every role's job yourself. These guides describe how each part of the job should be done; follow all of them:\n"""\n${guides}\n"""\n` : '');
+
+export function singlePrompt(requirement: string, process: boolean, guides?: string): string {
   if (!process) {
     return `${header('single')}
 ${requirement}
-
+${singleGuides(guides)}
 Implement this in the current workspace, including automated tests in tests/ that run with the project's own test tool (the one the requirement or the existing project uses). Run the tests and make sure they pass before you finish.`;
   }
   return `${header('single')}
@@ -151,7 +154,8 @@ Work in this order, writing each artifact to a file before moving on:
 2. contracts/ with the exported signatures (a .d.ts file) or API contract.
 3. tests/ covering every acceptance criterion and edge case, runnable with \`node --test\`. Write them before any implementation.
 4. The implementation, until all tests pass. Do not weaken or skip tests.
-5. Review your own diff and fix design problems, then write .devcrew/review.md.`;
+5. Review your own diff and fix design problems, then write .devcrew/review.md.
+${singleGuides(guides)}`;
 }
 
 /** Instructions for a role defined in a pipeline file. */

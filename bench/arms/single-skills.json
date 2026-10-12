@@ -1,0 +1,18 @@
+{
+  "id": "single-skills",
+  "code": "AS",
+  "name": "One AI · with role guides",
+  "summary": "One AI given the plain task plus every role guide the skilled team uses (risk planning, adversarial testing, defensive coding, security audit with Semgrep, requirement review). Tells apart the value of the know-how from the value of splitting the work.",
+  "agents": 1,
+  "steps": [
+    "AI gets the task and all role guides",
+    "AI plans, tests, codes, audits and reviews by itself",
+    "Stops when the AI says it is done"
+  ],
+  "role": "control",
+  "color": "#475569",
+  "mode": "single",
+  "process": false,
+  "guides": ["risk-planner", "test-engineer", "careful-developer", "security-auditor", "requirement-reviewer"],
+  "profile": "claude"
+}

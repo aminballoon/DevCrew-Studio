@@ -1454,6 +1454,7 @@ function describeSteps(def) {
       case 'gate': who = 'You'; what = `Review the ${{ plan: 'spec, architecture and the reports so far', code: 'code, test results and reviews', design: 'system diagram and the reports so far' }[s.review]} (“${esc(s.title)}”). Approve to continue${i === def.steps.length - 1 ? ' and commit' : ''}, or ask for changes to send it back to ${esc(nameOf(def.steps.find(x => x.id === s.reviseTo)))}.`; break;
       default: who = esc(s.name) + (s.agent ? ` <span class="hint">(${esc(s.agent)})</span>` : ''); what = `${esc(s.purpose)} May only write <code>${s.mayWrite.map(esc).join(', ')}</code>.${s.verdict?.onChanges === 'dev' ? ` Can send the code back to Dev, at most ${plural(s.verdict.maxRounds ?? 1, 'time')}.` : ''}${/^guide:/.test(s.instructions) ? ` Follows the role guide <code>pipelines/roles/${esc(s.instructions.slice(6))}.md</code>.` : ''}${s.needs?.length ? ` Needs an agent that can use ${esc(s.needs.join(' and '))}.` : ''}`;
     }
+    if (s.type !== 'agent' && /^guide:/.test(s.guide ?? '')) what += ` Also follows the role guide <code>pipelines/roles/${esc(s.guide.slice(6))}.md</code>.`;
     return `<li data-node="${s.type === 'build' ? 'dev' : s.id}"><b>${who}</b> ${what}</li>`;
   }).join('');
 }
