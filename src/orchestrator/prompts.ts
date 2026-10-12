@@ -134,7 +134,7 @@ export function singlePrompt(requirement: string, process: boolean): string {
     return `${header('single')}
 ${requirement}
 
-Implement this in the current workspace, including automated tests in tests/ runnable with \`node --test\`. Run the tests and make sure they pass before you finish.`;
+Implement this in the current workspace, including automated tests in tests/ that run with the project's own test tool (the one the requirement or the existing project uses). Run the tests and make sure they pass before you finish.`;
   }
   return `${header('single')}
 Requirement:
