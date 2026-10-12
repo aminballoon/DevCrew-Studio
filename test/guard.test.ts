@@ -128,3 +128,21 @@ test('a project folder inside another git repository is copied, not checked out 
   assert.equal(top.kind, 'worktree');
   g('worktree', 'remove', '--force', top.path);
 });
+
+test('Cargo build output is left alone; a target/ folder in a non-Rust project is still guarded', () => {
+  const rust = mkdtempSync(join(tmpdir(), 'devcrew-guard-rust-'));
+  writeFileSync(join(rust, 'Cargo.toml'), '[package]\nname = "x"\n');
+  const before = takeSnapshot(rust);
+  mkdirSync(join(rust, 'target/release'), { recursive: true });
+  writeFileSync(join(rust, 'target/release/x'), 'binary');
+  mkdirSync(join(rust, 'src'));
+  writeFileSync(join(rust, 'src/lib.rs'), 'pub fn a() {}');
+  assert.deepEqual(revertOutOfScope(rust, before, ROLE_SCOPES.qa), ['src/lib.rs']);
+  assert.ok(existsSync(join(rust, 'target/release/x')), 'build output kept');
+
+  const node = mkdtempSync(join(tmpdir(), 'devcrew-guard-node-'));
+  const before2 = takeSnapshot(node);
+  mkdirSync(join(node, 'target'));
+  writeFileSync(join(node, 'target/a.ts'), 'x');
+  assert.deepEqual(revertOutOfScope(node, before2, ROLE_SCOPES.qa), ['target/a.ts']);
+});

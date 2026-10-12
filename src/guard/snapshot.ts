@@ -1,9 +1,17 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { isAllowed, type Scope } from '../core/scope';
 
-const IGNORED_DIRS = new Set(['.git', 'node_modules', '.DS_Store']);
+const IGNORED_DIRS = new Set(['.git', 'node_modules', '.DS_Store', '__pycache__', '.pytest_cache']);
+
+/**
+ * Build output the test tools write, which no role authors: the guard must neither track nor
+ * delete it (deleting Cargo's target/ forced a full rebuild after every turn).
+ */
+function buildOutputDirs(workspace: string): Set<string> {
+  return new Set(existsSync(join(workspace, 'Cargo.toml')) ? ['target'] : []);
+}
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 
 /** Contents of every file in a workspace, keyed by POSIX relative path. */
@@ -11,9 +19,11 @@ export type Snapshot = Map<string, Buffer>;
 
 export function takeSnapshot(workspace: string): Snapshot {
   const out: Snapshot = new Map();
+  const buildDirs = buildOutputDirs(workspace);
   const walk = (dir: string) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (IGNORED_DIRS.has(entry.name)) { continue; }
+      if (dir === workspace && buildDirs.has(entry.name)) { continue; }
       const full = join(dir, entry.name);
       if (entry.isDirectory()) { walk(full); continue; }
       if (!entry.isFile() || statSync(full).size > MAX_FILE_BYTES) { continue; }
