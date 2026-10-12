@@ -81,6 +81,8 @@ export class AgentSession {
       sessionUpdate: async p => session?.onUpdate(p),
       writeTextFile: p => session!.writeTextFile(p),
       readTextFile: p => session!.readTextFile(p),
+      // Vendor extensions DevCrew does not use (e.g. Claude's _auth/status_update): ignore quietly
+      extNotification: async () => {},
     };
     const connection = new ClientSideConnection(() => client, stream);
 
