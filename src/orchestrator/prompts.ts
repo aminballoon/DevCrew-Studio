@@ -3,6 +3,7 @@ import type { VerifyResult } from '../guard/verify';
 import { SYSTEM_DIAGRAM, type AgentStep } from '../pipeline/schema';
 import { filesFor, type Plan, type PlanModule } from './plan';
 import { SYSTEM_FORMAT } from './system';
+import { TEST_FORMATS } from '../guard/testFormats';
 
 /** First line of every prompt. Real agents ignore it; the scripted fake agent routes on it. */
 const header = (role: Role, module = '-', attempt = 1) => `[devcrew role=${role} module=${module} attempt=${attempt}]`;
@@ -19,6 +20,7 @@ const PLAN_SCHEMA = `{
   "testCommand": "command that runs the whole test suite, e.g. node --test",
   "moduleTestCommand": "same command with {module} where the module id goes, e.g. node --test \\"tests/{module}/**/*.test.*\\"",
   "checks": [ { "name": "typecheck", "command": "npx tsc --noEmit" } ],
+  "testFormats": ["optional: what the test command prints, from ${TEST_FORMATS.join(', ')}; list several only when one command runs several tools"],
   "architecture": {
     "files": [
       {
@@ -51,6 +53,7 @@ Write these files (and only files under .devcrew/ and contracts/):
 3. .devcrew/plan.json — exactly this shape:
 ${PLAN_SCHEMA}
    Split the work into small modules that can be built and tested one at a time, in dependency order. Tests for module X will live in tests/X/.
+   Use the project's own language and test tool. DevCrew reads the results of node:test, jest, vitest, pytest, cargo test, ctest, GoogleTest, Unity, go test -v, any TAP output, and firmware "HIL:PASS/HIL:FAIL/HIL:DONE" lines; the test command must print one of them. Test cases are counted in tests/ by language: test()/it() in JS/TS, def test_ in Python, TEST()/RUN_TEST()/void test_ in C/C++, #[test] in Rust, func Test in *_test.go.
    The architecture must list EVERY file the run will create or change (contracts, source, tests, config), each with a clear purpose a non-programmer can follow. The approver reviews it as a diagram before any code is written, and files outside it will be flagged.
 ${feedback ? `\nThe approver sent this feedback on your previous plan. Address all of it:\n"""\n${feedback}\n"""\n` : ''}
 End with a short summary of the plan.`;

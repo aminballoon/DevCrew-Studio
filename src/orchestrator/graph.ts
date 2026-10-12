@@ -160,11 +160,11 @@ const verifyNode = node('verify', async s => {
   const commands: string[] = [];
   if (plan.moduleTestCommand && moduleTests > 0) {
     commands.push(plan.moduleTestCommand.replaceAll('{module}', module.id));
-    runs.push(await verify({ workspace: ws, testCommand: commands[0], baseline: s.baseline!, expectedTests: moduleTests }));
+    runs.push(await verify({ workspace: ws, testCommand: commands[0], baseline: s.baseline!, expectedTests: moduleTests, testFormats: plan.testFormats }));
   }
   if (isLast || runs.length === 0) {
     commands.push(plan.testCommand, ...(isLast ? plan.checks ?? [] : []).map(c => c.command));
-    runs.push(await verify({ workspace: ws, testCommand: plan.testCommand, baseline: s.baseline!, checks: isLast ? plan.checks : [] }));
+    runs.push(await verify({ workspace: ws, testCommand: plan.testCommand, baseline: s.baseline!, checks: isLast ? plan.checks : [], testFormats: plan.testFormats }));
   }
   // Without per-module tests, earlier modules cannot pass alone: only judge at the end
   const deferred = runs.length === 1 && !isLast && !(plan.moduleTestCommand && moduleTests > 0);

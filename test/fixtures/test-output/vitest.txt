@@ -1,0 +1,33 @@
+
+ RUN  v2.1.9 <tmp>/js
+
+ ❯ tests/b.test.mjs (4 tests | 1 failed | 1 skipped) 3ms
+   × bad 2ms
+     → expected 1 to be 2 // Object.is equality
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/b.test.mjs > bad
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ tests/b.test.mjs:4:29
+      2| test('ok', () => expect(1).toBe(1));
+      3| test('ok2', () => expect(2).toBe(2));
+      4| test('bad', () => expect(1).toBe(2));
+       |                             ^
+      5| test.skip('skip', () => {});
+      6| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed | 1 skipped (4)
+   Start at  17:28:20
+   Duration  235ms (transform 7ms, setup 0ms, collect 4ms, tests 3ms, environment 0ms, prepare 27ms)
+

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { DATA_ROOT } from '../core/config';
 
@@ -14,13 +14,18 @@ export interface Workspace {
 const git = (cwd: string, ...args: string[]) =>
   execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
+/**
+ * Whether the folder is the top of a git repository. A folder inside someone else's repository
+ * (for example a demo project inside DevCrew's own repo) is copied instead: a worktree would
+ * check out the whole parent repository.
+ */
 function isGitRepo(dir: string): boolean {
-  try { return git(dir, 'rev-parse', '--is-inside-work-tree') === 'true'; } catch { return false; }
+  try { return realpathSync(git(dir, 'rev-parse', '--show-toplevel')) === realpathSync(dir); } catch { return false; }
 }
 
 /**
  * An isolated place for one run to work in.
- * A git repository gets a new worktree on branch devcrew/<runId>; anything else is copied
+ * The top folder of a git repository gets a new worktree on branch devcrew/<runId>; anything else is copied
  * and given a fresh repository, so every run can show a diff from where it started.
  */
 export function prepareWorkspace(source: string | undefined, runId: string): Workspace {

@@ -95,3 +95,23 @@ test('verify ignores FORCE_COLOR in the environment', async () => {
     if (saved === undefined) delete process.env.FORCE_COLOR; else process.env.FORCE_COLOR = saved;
   }
 });
+
+test('a project folder inside another git repository is copied, not checked out as a worktree', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { prepareWorkspace } = await import('../src/guard/workspace');
+  const repo = mkdtempSync(join(tmpdir(), 'devcrew-parent-'));
+  const g = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
+  mkdirSync(join(repo, 'demo/seed'), { recursive: true });
+  writeFileSync(join(repo, 'demo/seed/app.js'), 'export const x = 1;\n');
+  writeFileSync(join(repo, 'parent-only.txt'), 'not part of the project\n');
+  g('init', '-q'); g('add', '-A'); g('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'init');
+
+  const inside = prepareWorkspace(join(repo, 'demo/seed'), `inside-${Date.now()}`);
+  assert.equal(inside.kind, 'copy');
+  assert.ok(existsSync(join(inside.path, 'app.js')));
+  assert.ok(!existsSync(join(inside.path, 'parent-only.txt')));
+
+  const top = prepareWorkspace(repo, `top-${Date.now()}`);
+  assert.equal(top.kind, 'worktree');
+  g('worktree', 'remove', '--force', top.path);
+});

@@ -62,6 +62,15 @@
 - Tests: 20 (validator rules, a security step that sends work back once, the minimal pipeline).
 - Not yet: the fake demo agent only has scripts for the built-in roles and `security`, so other new roles write nothing in demo runs. Diagrams of long pipelines get crowded. Gate ids changed from `spec`/`merge` to the step ids (`gate_spec`/`gate_merge`); old runs still display correctly.
 
+## Latest changes (2026-10-12, git repo, test formats)
+- The project is a git repository, pushed to https://github.com/aminballoon/DevCrew-Studio (`main`).
+- **Verify reads many test tools** (`src/guard/testFormats.ts`): node:test, jest, vitest, pytest, cargo test, ctest, GoogleTest, Unity, `go test -v`, any TAP output, and firmware `HIL:PASS / HIL:FAIL / HIL:DONE` lines (a run that never prints `HIL:DONE` counts as a failure). `plan.json` may list `testFormats`; otherwise the first format found is used. Output with no recognisable results fails with a clear reason.
+- **Declared tests are counted per language:** JS/TS `test()/it()`, Python `def test_`, C/C++ `TEST()`, `RUN_TEST()` or `void test_`, Rust `#[test]`, Go `func Test`.
+- The Planner is told which formats are read and to use the project's own test tool.
+- Parsers are tested against real output captured from pytest 8.4, ctest 4.4, Unity, jest 29 and vitest 2 (`test/fixtures/test-output/`); GoogleTest, cargo, go and TAP from their documented formats.
+- **Fixed:** a project folder inside another git repository (such as the demo seeds inside DevCrew's own repo) was checked out as a worktree of the whole parent repository. Only a repository's top folder gets a worktree now; anything else is copied.
+- Tests: 35.
+
 ## Latest changes (2026-10-12, role guides, agent capabilities, isolated Claude)
 - **Role guides:** `pipelines/roles/<name>.md` holds a role's instructions; steps use `"instructions": "guide:<name>"`. Seven guides from the three presets. Approval records each guide's hash (`guideHashes`); a changed guide puts the pipeline back under review. Runs keep the guide text they started with.
 - **Capabilities:** steps declare `needs` (`web`, `shell`); agents declare `provides` in `devcrew.config.json` (`claude`: web, shell; `codex`: shell). A run whose profile gives a role an agent without what it needs is refused before it starts; an agent that declares nothing gets a warning in the run log.
@@ -155,11 +164,10 @@
 - [ ] แสดงโควต้าสดของแต่ละ vendor บน dashboard
 - [ ] เปิดและทดสอบ LangGraph Studio จริง
 - [ ] Container หรือ network sandbox สำหรับ agent (ตอนนี้แยกแค่โฟลเดอร์และ scope ของไฟล์)
-- [ ] รองรับภาษาอื่นนอกจาก Node/TS ใน Verify (ตัว parse ผลเทสรองรับแค่ `node:test`)
+- [x] รองรับภาษาอื่นนอกจาก Node/TS ใน Verify (ดู Latest changes: test formats)
 
 ### Presets ใหม่ (existing-code, firmware-board, system-integration)
 - [ ] รันทั้ง 3 preset กับ agent จริง (ตอนนี้ทดสอบแค่กับ demo agent)
-- [ ] firmware-board: Verify อ่านผลเทสได้แค่รูปแบบ `node:test` เทส firmware (Unity, ctest, pytest, HIL) ต้องห่อด้วย node:test หรือต้องเพิ่มตัวอ่านผลเทสแบบอื่น
 - [ ] firmware-board: ทดสอบ HIL rig กับบอร์ดจริง (flash, serial, lock, SSH) ยังไม่เคยรันกับ hardware
 - [ ] เช็คว่า Codex ผ่าน `codex-acp` ค้นเว็บได้ไหม ถ้าได้ เพิ่ม `web` ใน `provides`
 - [ ] ส่งต่อจาก design pipeline ไป build pipeline (ใช้ branch ของ design เป็น source) ตอนนี้ต้องทำเอง
@@ -180,7 +188,7 @@
 - [ ] เอาผล demo ออกจาก `bench/results/demo-fake` ก่อนนำเสนอ หรือแยกให้ชัดเจน
 
 ### Repo
-- [ ] `git init` + commit แรก (ตอนนี้โฟลเดอร์ยังไม่เป็น git repo)
+- [x] `git init` + push ขึ้น GitHub
 
 ---
 

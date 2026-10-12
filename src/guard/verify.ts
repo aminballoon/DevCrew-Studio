@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { childEnv } from '../core/env';
 import type { TestCounts } from '../core/events';
 import { hashFiles, takeSnapshot } from './snapshot';
+import { declaredIn, parseTestOutput, TEST_FORMATS } from './testFormats';
 
 export interface CommandResult { code: number; output: string; timedOut: boolean }
 
@@ -20,22 +21,16 @@ export function runCommand(command: string, cwd: string, timeoutMs = 10 * 60_000
 
 const ANSI = /\x1b\[[0-9;]*m/g;
 
-/** Summary counts from node:test (TAP "# pass 3" or spec "ℹ pass 3") output. */
-export function parseTestCounts(raw: string): TestCounts {
-  const output = raw.replace(ANSI, '');
-  const read = (name: string) => {
-    const all = [...output.matchAll(new RegExp(`^[#ℹ]\\s*${name}\\s+(\\d+)`, 'gm'))];
-    return all.length ? Number(all[all.length - 1][1]) : 0;
-  };
-  return { total: read('tests'), pass: read('pass'), fail: read('fail'), skipped: read('skipped') + read('todo') };
+/** Summary counts from a test run's output, in any supported format (see testFormats.ts). */
+export function parseTestCounts(raw: string, formats?: string[]): TestCounts {
+  return parseTestOutput(raw.replace(ANSI, ''), formats).tests;
 }
 
-/** Test cases declared in the locked test files, counted without running them. */
+/** Test cases declared in the locked test files (any supported language), counted without running them. */
 export function countDeclaredTests(workspace: string, prefix = 'tests/'): number {
   let n = 0;
   for (const [path, content] of takeSnapshot(workspace)) {
-    if (!path.startsWith(prefix)) { continue; }
-    n += (content.toString('utf8').match(/^\s*(?:test|it)(?:\.only)?\s*\(/gm) ?? []).length;
+    if (path.startsWith(prefix)) { n += declaredIn(path, content.toString('utf8')); }
   }
   return n;
 }
@@ -60,6 +55,8 @@ export interface VerifyResult {
   tests: TestCounts;
   reasons: string[];
   output: string;
+  /** Which test output format the counts were read from. */
+  format?: string | null;
 }
 
 /**
@@ -73,6 +70,8 @@ export async function verify(opts: {
   /** Declared tests expected to run with this command (defaults to all). */
   expectedTests?: number;
   checks?: Check[];
+  /** Test output formats to read (plan.json testFormats); found automatically when empty. */
+  testFormats?: string[];
 }): Promise<VerifyResult> {
   const reasons: string[] = [];
 
@@ -81,9 +80,12 @@ export async function verify(opts: {
   if (tampered.length) { reasons.push(`Locked files changed: ${tampered.join(', ')}`); }
 
   const run = await runCommand(opts.testCommand, opts.workspace);
-  const tests = parseTestCounts(run.output);
+  const { tests, format } = parseTestOutput(run.output, opts.testFormats);
   const expected = opts.expectedTests ?? opts.baseline.declared;
   if (run.timedOut) { reasons.push('Test command timed out'); }
+  if (!format && expected > 0) {
+    reasons.push(`No test results found in the output (${opts.testFormats?.length ? `expected ${opts.testFormats.join(', ')}` : `supported: ${TEST_FORMATS.join(', ')}`})`);
+  }
   if (tests.fail > 0) { reasons.push(`${tests.fail} of ${tests.total} tests failed`); }
   if (tests.skipped > 0) { reasons.push(`${tests.skipped} tests skipped`); }
   if (tests.total < expected) { reasons.push(`Only ${tests.total} of ${expected} declared tests ran`); }
@@ -97,5 +99,5 @@ export async function verify(opts: {
       output += `\n\n--- ${check.name} ---\n${r.output}`;
     }
   }
-  return { passed: reasons.length === 0, tests, reasons, output: output.slice(-12_000) };
+  return { passed: reasons.length === 0, tests, reasons, output: output.slice(-12_000), format };
 }

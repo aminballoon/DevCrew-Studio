@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Check } from '../guard/verify';
+import { TEST_FORMATS, type TestFormat } from '../guard/testFormats';
 
 export interface PlanModule { id: string; title: string; description: string }
 
@@ -28,6 +29,8 @@ export interface Plan {
   /** Test command for one module, with {module} standing for its id. */
   moduleTestCommand?: string;
   checks?: Check[];
+  /** Test output formats the test command prints (see guard/testFormats.ts); found automatically when absent. */
+  testFormats?: string[];
 }
 
 export const PLAN_PATH = '.devcrew/plan.json';
@@ -47,6 +50,7 @@ export function readPlan(workspace: string): Plan {
     testCommand: raw.testCommand || 'node --test',
     moduleTestCommand: raw.moduleTestCommand?.includes('{module}') ? raw.moduleTestCommand : undefined,
     checks: (raw.checks ?? []).filter(c => c?.name && c?.command),
+    testFormats: Array.isArray(raw.testFormats) ? raw.testFormats.filter(f => TEST_FORMATS.includes(f as TestFormat)) : undefined,
   };
 }
 

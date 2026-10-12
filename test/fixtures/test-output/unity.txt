@@ -1,0 +1,8 @@
+test_x.c:10:test_ok:PASS
+test_x.c:11:test_ok2:PASS
+test_x.c:6:test_bad:FAIL: Expected 1 Was 2
+test_x.c:7:test_ign:IGNORE
+
+-----------------------
+4 Tests 1 Failures 1 Ignored 
+FAIL
