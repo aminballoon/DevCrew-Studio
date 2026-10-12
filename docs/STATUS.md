@@ -62,6 +62,13 @@
 - Tests: 20 (validator rules, a security step that sends work back once, the minimal pipeline).
 - Not yet: the fake demo agent only has scripts for the built-in roles and `security`, so other new roles write nothing in demo runs. Diagrams of long pipelines get crowded. Gate ids changed from `spec`/`merge` to the step ids (`gate_spec`/`gate_merge`); old runs still display correctly.
 
+## Latest changes (2026-10-12, Resume button)
+- A run whose process ended before it finished (closed terminal, crash, restart) shows as **Stopped** in the run list and the run page, with a **Resume from <step>** button. Failed runs with steps left (for example after a usage limit) get the same button and the reason they stopped.
+- Each driving process records itself in `runs/<id>/owner.json` (pid); a run still driven by a live process, here or a CLI in another terminal, cannot be resumed, so two processes never work on one run.
+- API: `GET /api/runs/<id>/resume` (can it resume, from which step, or why not) and `POST` to resume. CLI: `npm run run -- resume <runId>`.
+- Checked in the browser: a demo run killed during QA showed Stopped, Resume continued from QA to Done · committed (9/9), and the Planner was not repeated.
+- Tests: 38 (a CLI run in a child process is refused while alive, shows stopped after it is killed, and resumes to the end).
+
 ## Latest changes (2026-10-12, first real runs of the three presets)
 Run with the CLI, profile `claude`, `--auto`, on small projects (requirements and seeds were kept in the session scratchpad, not in the repo). Costs are API-price equivalents reported by the agents; the account is Claude Pro.
 
@@ -182,7 +189,7 @@ Seen, not fixed yet:
 
 ### Pipeline
 - [ ] Quota-aware scheduling: เช็คโควต้าก่อนเริ่มแต่ละขั้น, พักรอเมื่อหมด แล้วทำต่อเอง (reuse `ClaudeUsageProbe` และ `CodexRateLimits` จาก vscode-acp)
-- [x] Resume run ที่ค้างกลางทาง: `npm run run -- resume <runId>` (ยังไม่มีปุ่มใน dashboard)
+- [x] Resume run ที่ค้างกลางทาง: ปุ่ม Resume ใน dashboard และ `npm run run -- resume <runId>`
 - [ ] ทดสอบโหมด git worktree กับ repo จริง และการ merge branch `devcrew/<runId>`
 - [ ] แสดงโควต้าสดของแต่ละ vendor บน dashboard
 - [ ] เปิดและทดสอบ LangGraph Studio จริง

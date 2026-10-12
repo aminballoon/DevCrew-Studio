@@ -112,6 +112,7 @@ code, pre { font-family: var(--mono); font-size: 12.5px; }
 .dot.waiting { background: var(--warn); animation: pulse 1.4s infinite; }
 .dot.approved, .dot.completed { background: var(--ok); }
 .dot.failed { background: var(--bad); }
+.dot.stopped { background: var(--warn); }
 .dot.aborted { background: var(--muted); }
 @keyframes pulse { 50% { opacity: .35; } }
 
@@ -128,6 +129,7 @@ code, pre { font-family: var(--mono); font-size: 12.5px; }
 .pill.waiting { background: var(--warn-soft); color: var(--warn); }
 .pill.approved, .pill.completed { background: var(--ok-soft); color: var(--ok); }
 .pill.failed { background: var(--bad-soft); color: var(--bad); }
+.pill.stopped { background: var(--warn-soft); color: var(--warn); }
 
 .stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
 .stat { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--shadow); }
@@ -575,3 +577,6 @@ pre.code { background: var(--panel-2); padding: 12px; border-radius: 8px; overfl
 .md-table table { border-collapse: collapse; font-size: 12.5px; }
 .md-table th, .md-table td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; vertical-align: top; }
 .md-table th { background: var(--panel); }
+
+.card.resume { border-left: 5px solid var(--warn); margin-bottom: 16px; }
+.card.resume p { margin: 0 0 10px; }

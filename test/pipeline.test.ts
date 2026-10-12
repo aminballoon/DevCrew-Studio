@@ -205,8 +205,39 @@ test('resume refuses a run that waits at a gate or has finished', { timeout: 60_
   const runs = new RunManager();
   const runId = runs.start({ requirement: 'cart', source: join(TASK, 'seed'), profile: 'fake' });
   await waitForGate(runId);
-  await assert.rejects(runs.resume(runId), /waiting at a gate/);
+  await assert.rejects(runs.resume(runId), /waiting at a gate/i);
+  const finished = runs.waitFor(runId);
   await runs.resolveGate(runId, { decision: 'abort' });
-  await runs.waitFor(runId);
-  await assert.rejects(runs.resume(runId), /already finished/);
+  await finished;
+  await assert.rejects(runs.resume(runId), /has finished/);
+});
+
+test('a run whose process dies is shown as stopped and resumes to the end; a live one cannot be resumed twice', { timeout: 90_000 }, async () => {
+  const { spawn } = await import('node:child_process');
+  const child = spawn(process.execPath, ['--import', 'tsx', 'src/cli.ts', 'start', '--requirement', join(TASK, 'requirement.md'), '--source', join(TASK, 'seed'), '--profile', 'fake', '--auto'], {
+    cwd: STUDIO_ROOT, env: { ...process.env, FAKE_DELAY_MS: '400' }, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let out = '';
+  child.stdout!.on('data', d => { out += d; });
+  const runId = await new Promise<string>((resolve, reject) => {
+    const t = setInterval(() => { const m = out.match(/Run (\S+)/); if (m && /start\s+qa/.test(out)) { clearInterval(t); resolve(m[1]); } }, 100);
+    setTimeout(() => { clearInterval(t); reject(new Error(`CLI run did not reach QA:\n${out}`)); }, 60_000);
+  });
+
+  const runs = new RunManager();
+  const live = await runs.resumeInfo(runId);
+  assert.equal(live.resumable, false);
+  assert.match(live.reason!, /another process/);
+
+  child.kill('SIGKILL');
+  await new Promise(r => child.once('exit', r));
+  assert.equal(runs.list().find(r => r.runId === runId)?.status, 'stopped');
+  const info = await runs.resumeInfo(runId);
+  assert.equal(info.resumable, true, info.reason);
+
+  const done = runs.waitFor(runId);
+  await runs.resume(runId);
+  assert.equal(await done, 'approved');
+  const stages = getBus().read(runId).flatMap(e => (e.type === 'node_started' ? [e.node] : []));
+  assert.equal(stages.filter(s => s === 'planner').length, 1, 'the planner is not repeated');
 });

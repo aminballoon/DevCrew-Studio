@@ -71,6 +71,16 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   const url = new URL(req.url ?? '/', 'http://localhost');
   const path = url.pathname;
   const runMatch = path.match(/^\/api\/runs\/([\w-]+)(\/gate)?$/);
+  const resumeMatch = path.match(/^\/api\/runs\/([\w-]+)\/resume$/);
+  if (resumeMatch && req.method === 'GET') { return json(res, 200, await runs.resumeInfo(resumeMatch[1])); }
+  if (resumeMatch && req.method === 'POST') {
+    try {
+      await runs.resume(resumeMatch[1]);
+      return json(res, 202, { ok: true });
+    } catch (e) {
+      return json(res, 409, { error: (e as Error).message });
+    }
+  }
 
   if (path === '/api/config' && req.method === 'GET') {
     const cfg = getConfig();

@@ -136,8 +136,12 @@ function buildModel(events) {
       r.tokens += e.totalTokens; r.cost += e.costUsd; r.input += e.inputTokens - e.cachedReadTokens; r.cached += e.cachedReadTokens; r.output += e.outputTokens;
     }
     if (e.type === 'run_finished') Object.assign(m, { status: e.status, endedAt: e.ts, error: e.error });
+    // A run resumed after it stopped or failed is running again
+    if (e.type === 'node_started' && m.endedAt) Object.assign(m, { status: 'running', endedAt: undefined, error: undefined });
   }
   if (m.gate) m.status = 'waiting';
+  // The server found nobody driving this run: it stopped mid-way and can be resumed
+  if (m.status === 'running' && S.resume?.runId === S.selected && S.resume.resumable) m.status = 'stopped';
   const last = steps.at(-1);
   let prevNode = null, prevPassed = true;
   for (const s of steps) {
@@ -189,6 +193,7 @@ function nowSentence(m) {
   const sum = `${m.lastVerify ? `${m.lastVerify.tests.pass}/${m.lastVerify.tests.total} tests passing · ` : ''}took ${fmtDur((m.endedAt ?? Date.now()) - m.started)} · ${fmtTok(m.tokens)} tokens (${fmtUsd(m.cost)})`;
   if (m.status === 'approved') return ['ok', `Done and committed. ${sum}`];
   if (m.status === 'completed') return ['ok', `Finished. ${sum}`];
+  if (m.status === 'stopped') return ['bad', 'Stopped: the process running this run ended before it finished (closed terminal, crash or restart).'];
   if (m.status === 'failed') return ['bad', `Failed: ${m.error ?? 'see the activity log'}`];
   if (m.status === 'aborted') return ['muted', 'Cancelled'];
   const a = m.active;
@@ -349,6 +354,7 @@ function renderRun() {
   view.innerHTML = `
     <div id="run-head"></div>
     <div id="now" class="now"></div>
+    <div id="resume-slot"></div>
     <div class="stats" id="stats"></div>
     <section class="card pipeline"><div class="card-head"><h3>Pipeline</h3><span class="hint">Click a box to see what that role received, did and handed on</span></div>
       <div class="pipeline-wrap" id="flow"></div></section>
@@ -375,13 +381,14 @@ function update(first = false) {
   if (!$('#run-head')) return;
   const m = buildModel(S.events);
   const title = m.label || (m.requirement ?? '').split('\n')[0].replace(/[`*#]/g, '').slice(0, 90);
-  const statusText = { running: 'Running', waiting: 'Waiting for you', approved: 'Done · committed', completed: 'Finished', failed: 'Failed', aborted: 'Cancelled' }[m.status];
+  const statusText = { running: 'Running', stopped: 'Stopped', waiting: 'Waiting for you', approved: 'Done · committed', completed: 'Finished', failed: 'Failed', aborted: 'Cancelled' }[m.status];
   $('#run-head').innerHTML = `<div class="run-head"><div><h1>${esc(title)}</h1>
     <div class="meta"><span>${m.mode === 'single' ? 'Single AI mode' : 'AI team mode'}</span><span>agent: <b>${esc(m.profile)}</b></span><span>started ${m.started ? fmtTime(m.started) : ''}</span><span class="mono">${esc(S.selected)}</span></div></div>
     <span class="pill ${m.status}">${statusText}</span></div>`;
   const [tone, sentence] = nowSentence(m);
   $('#now').className = `now ${tone}`;
   $('#now').textContent = sentence;
+  renderResume(m);
   // A design pipeline writes no code: no tests, modules or code architecture to show
   const design = DEF?.kind === 'design';
   $('#arch-card').hidden = design;
@@ -1245,7 +1252,7 @@ function refreshRunList() {
   clearTimeout(listTimer);
   listTimer = setTimeout(async () => {
     S.runs = await (await fetch('/api/runs')).json();
-    const statusText = { running: 'Running', waiting: 'Your turn', approved: 'Done', completed: 'Finished', failed: 'Failed', aborted: 'Cancelled' };
+    const statusText = { running: 'Running', stopped: 'Stopped', waiting: 'Your turn', approved: 'Done', completed: 'Finished', failed: 'Failed', aborted: 'Cancelled' };
     $('#run-list').innerHTML = S.runs.map(r => `<li data-id="${r.runId}" class="${r.runId === S.selected ? 'selected' : ''}">
       <span class="dot ${r.status}"></span><span class="title">${esc(r.label || r.requirement.split('\n')[0].replace(/[`*#]/g, ''))}</span>
       <span class="sub"><span>${statusText[r.status] ?? r.status}</span><span>${new Date(r.startedAt).toLocaleString('en-GB', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span><span>${esc(r.profile)}</span></span></li>`).join('')
@@ -1253,7 +1260,48 @@ function refreshRunList() {
   }, 150);
 }
 
+// ---------- Resume a run that stopped mid-way ----------
+
+/** Ask the server whether the selected run can continue; it knows whether any process still drives it. */
+async function checkResume() {
+  const runId = S.selected;
+  if (!runId || !['running', 'stopped', 'failed'].includes(S.lastStatus)) { if (S.resume) { S.resume = null; update(); } return; }
+  try {
+    const info = await (await fetch(`/api/runs/${runId}/resume`)).json();
+    if (runId !== S.selected) return;
+    const changed = JSON.stringify(info) !== JSON.stringify(S.resume && { ...S.resume, runId: undefined });
+    S.resume = { ...info, runId };
+    if (changed) update();
+  } catch { /* server restarting */ }
+}
+
+function renderResume(m) {
+  S.lastStatus = m.status;
+  const slot = $('#resume-slot');
+  const r = S.resume;
+  if (!r?.resumable || r.runId !== S.selected || !['stopped', 'failed'].includes(m.status)) { slot.innerHTML = ''; return; }
+  const at = r.next.join(', ');
+  if (slot.dataset.key === `${S.selected}:${at}`) return;
+  slot.dataset.key = `${S.selected}:${at}`;
+  slot.innerHTML = `<section class="card resume"><div class="card-body">
+    <p><b>The work so far is saved.</b> Resume continues from <b>${esc(at)}</b>, the step that was interrupted, which starts again from its beginning. Earlier steps are not repeated.</p>
+    ${m.status === 'failed' && m.error ? `<p class="hint">It stopped because: ${esc(m.error)}. If that was a usage limit, resume after it resets.</p>` : ''}
+    <button type="button" class="btn primary" id="resume-btn">Resume from ${esc(at)}</button> <span class="hint" id="resume-msg"></span></div></section>`;
+  $('#resume-btn').addEventListener('click', async e => {
+    e.target.disabled = true;
+    $('#resume-msg').textContent = 'Starting…';
+    const res = await fetch(`/api/runs/${S.selected}/resume`, { method: 'POST' });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) { $('#resume-msg').textContent = body.error ?? 'Could not resume'; e.target.disabled = false; return; }
+    S.resume = null;
+    slot.innerHTML = '';
+    slot.dataset.key = '';
+  });
+}
+
 async function select(runId) {
+  S.resume = null;
+  S.lastStatus = null;
   S.selected = runId;
   S.popup = null;
   S.archVersion = null;
@@ -1263,6 +1311,7 @@ async function select(runId) {
   S.events = runId ? await (await fetch(`/api/runs/${runId}`)).json() : [];
   renderRun();
   refreshRunList();
+  checkResume();
 }
 
 function connect() {
@@ -1627,6 +1676,8 @@ async function boot() {
   refreshRunList();
   loadPipelines();
   setInterval(() => { if (S.tab === 'pipelines') renderPipelinesTab(); else loadPipelines(); }, 5000);
+  // A run's process can end without a word (closed terminal, crash): look again now and then
+  setInterval(() => { if (S.tab === 'runs' || S.selected) checkResume(); }, 15000);
   const pipeHash = location.hash.match(/^#pipelines(?:=([\w-]+))?/);
   if (pipeHash) { S.pipeId = pipeHash[1]; S.pipeDraft = true; }
   const fromHash = location.hash.match(/run=([\w-]+)/)?.[1];

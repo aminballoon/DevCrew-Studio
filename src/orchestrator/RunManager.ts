@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readdirSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Command } from '@langchain/langgraph';
 import { SqliteSaver } from '@langchain/langgraph-checkpoint-sqlite';
 
-import { DATA_ROOT } from '../core/config';
+import { DATA_ROOT, runDir } from '../core/config';
 import { usageByRole, type DevcrewEvent, type GateId } from '../core/events';
 import { loadPipeline, validatePipeline, withGuides, type PipelineDef } from '../pipeline/schema';
 import { buildGraph, type GateAnswer } from './graph';
@@ -25,7 +25,8 @@ export interface RunSummary {
   requirement: string;
   label?: string;
   profile: string;
-  status: 'running' | 'waiting' | 'approved' | 'aborted' | 'failed' | 'completed';
+  /** "stopped": the log says running, but no process is driving it any more (it can be resumed). */
+  status: 'running' | 'stopped' | 'waiting' | 'approved' | 'aborted' | 'failed' | 'completed';
   waitingGate?: GateId;
   startedAt: number;
   endedAt?: number;
@@ -95,17 +96,37 @@ export class RunManager {
   }
 
   /**
-   * Continue a run whose process stopped mid-way (closed terminal, crash, killed on purpose),
-   * from the last step it finished. The step that was interrupted runs again from its start.
+   * Whether a run can continue from where it stopped, and from which step. A run that is
+   * still being driven, here or by another process (a CLI in another terminal), cannot:
+   * two processes on one run would overwrite each other's work.
    */
-  async resume(runId: string): Promise<void> {
-    await this.active.get(runId);
+  async resumeInfo(runId: string): Promise<ResumeInfo> {
+    if (!getBus().read(runId).some(e => e.type === 'run_started')) { return { resumable: false, reason: `No run ${runId}` }; }
+    // A job that has just stopped at a gate or finished does no more work; let it settle
+    const job = this.active.get(runId);
+    if (job && ['gate_waiting', 'run_finished'].includes(getBus().read(runId).at(-1)?.type ?? '')) { await job; }
+    const owner = liveOwner(runId);
+    if (this.active.has(runId) || owner) {
+      return { resumable: false, reason: owner && owner !== process.pid ? `Still running in another process (pid ${owner})` : 'Still running' };
+    }
     const def = this.pipelineOf(runId);
     const state = await this.graphFor(def).getState(this.config(runId));
-    if (state.tasks.some(t => t.interrupts.length)) { throw new Error('Run is waiting at a gate: answer the gate instead'); }
-    if (!state.next.length) { throw new Error(state.values && Object.keys(state.values).length ? 'Run has already finished' : `No saved progress for run ${runId}`); }
-    getBus().emit(runId, { type: 'log', level: 'info', message: `Resumed at ${state.next.join(', ')}.` });
-    this.drive(runId, def, null);
+    if (state.tasks.some(t => t.interrupts.length)) { return { resumable: false, reason: 'Waiting at a gate: answer the gate instead' }; }
+    if (!state.next.length) {
+      return { resumable: false, reason: state.values && Object.keys(state.values).length ? 'The run has finished' : 'No saved progress for this run' };
+    }
+    return { resumable: true, next: state.next.map(n => stepLabel(def, n)) };
+  }
+
+  /**
+   * Continue a run whose process stopped mid-way (closed terminal, crash, quota, killed on
+   * purpose) from the last step it finished. The step that was interrupted runs again from its start.
+   */
+  async resume(runId: string): Promise<void> {
+    const info = await this.resumeInfo(runId);
+    if (!info.resumable) { throw new Error(info.reason); }
+    getBus().emit(runId, { type: 'log', level: 'info', message: `Resumed at ${info.next!.join(', ')}.` });
+    this.drive(runId, this.pipelineOf(runId), null);
   }
 
   /** Resolves with the final status (used by the benchmark runner). */
@@ -117,6 +138,8 @@ export class RunManager {
     let ids: string[] = [];
     try { ids = readdirSync(join(DATA_ROOT, 'runs')); } catch { /* no runs yet */ }
     return ids.map(id => summarize(id, getBus().read(id))).filter((r): r is RunSummary => !!r)
+      // "Running" with nobody driving it means its process stopped: it can be resumed
+      .map(r => (r.status === 'running' && !this.active.has(r.runId) && !liveOwner(r.runId) ? { ...r, status: 'stopped' as const } : r))
       .sort((a, b) => b.startedAt - a.startedAt);
   }
 
@@ -149,7 +172,8 @@ export class RunManager {
       }
     })();
     this.active.set(runId, job);
-    void job.finally(() => this.active.delete(runId));
+    claimOwner(runId);
+    void job.finally(() => { this.active.delete(runId); releaseOwner(runId); });
   }
 }
 
@@ -181,6 +205,43 @@ export function summarize(runId: string, events: DevcrewEvent[]): RunSummary | u
     totalTokens: usage.reduce((n, u) => n + u.totalTokens, 0),
     costUsd: usage.reduce((n, u) => n + u.costUsd, 0),
   };
+}
+
+export interface ResumeInfo { resumable: boolean; next?: string[]; reason?: string }
+
+// --- Which process drives a run ---
+// runs/<id>/owner.json holds the pid while a process drives the run, so a run started from the
+// CLI is not resumed by the dashboard (or the other way round) while it is still going.
+
+const ownerPath = (runId: string) => join(runDir(runId), 'owner.json');
+
+function claimOwner(runId: string): void {
+  mkdirSync(runDir(runId), { recursive: true });
+  writeFileSync(ownerPath(runId), JSON.stringify({ pid: process.pid, since: Date.now() }));
+}
+
+function releaseOwner(runId: string): void {
+  try {
+    const { pid } = JSON.parse(readFileSync(ownerPath(runId), 'utf8'));
+    if (pid === process.pid) { unlinkSync(ownerPath(runId)); }
+  } catch { /* already gone */ }
+}
+
+/** The pid of a live process driving the run, if any. */
+function liveOwner(runId: string): number | null {
+  try {
+    const { pid } = JSON.parse(readFileSync(ownerPath(runId), 'utf8')) as { pid: number };
+    process.kill(pid, 0);
+    return pid;
+  } catch { return null; }
+}
+
+/** A graph node in words: the build step's nodes are Dev and Verify. */
+function stepLabel(def: PipelineDef, node: string): string {
+  const step = def.steps.find(s => s.id === node);
+  if (step?.type === 'agent') { return step.name; }
+  if (step?.type === 'gate') { return step.title; }
+  return { planner: 'Planner', qa: 'QA', dev: 'Dev', verify: 'Verify', escalate: 'Escalation', finish: 'Finish' }[node] ?? node;
 }
 
 function checked(def: PipelineDef): PipelineDef {
