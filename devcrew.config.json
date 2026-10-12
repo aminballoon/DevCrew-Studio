@@ -50,6 +50,19 @@
       ],
       "note": "Codex CLI. Web search is not assumed: give roles that need the web another agent."
     },
+    "agy": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "google-antigravity-acp@2.0.1",
+        "--model",
+        "gemini-3.8-flash-high"
+      ],
+      "provides": [
+        "shell"
+      ],
+      "note": "Antigravity CLI (agy) through the google-antigravity-acp adapter (third-party, MIT, same one vscode-acp uses). Needs agy on PATH and logged in. The adapter auto-approves agy tool calls; DevCrew guards file scope. Version pinned for benchmarks."
+    },
     "fake": {
       "command": "node",
       "args": [
@@ -100,6 +113,14 @@
       "reviewer": "codex",
       "single": "claude"
     },
+    "agy": {
+      "planner": "agy",
+      "qa": "agy",
+      "dev": "agy",
+      "reviewer": "agy",
+      "security": "agy",
+      "single": "agy"
+    },
     "fake": {
       "planner": "fake",
       "qa": "fake",
@@ -131,7 +152,8 @@
     "fake": "Demo, no quota. Small shopping-cart project (4 files). Use project folder bench/tasks/S-01-cart/seed.",
     "fake-expenses": "Demo, no quota. Medium expense-splitter project (3 parts, 9 files). Ask for changes at Gate 1 to see the Planner send a second version of the architecture. Use project folder bench/tasks/M-01-expenses/seed.",
     "fake-trouble": "Demo, no quota. Things go wrong: Dev never fixes its bug, tries to edit tests and adds a file outside the design, so the run stops for your decision. Use project folder bench/tasks/S-01-cart/seed.",
-    "claude-isolated": "Real Claude Code agents without your personal skills, plugins and CLAUDE.md. Use it for benchmarks against other vendors. Uses your subscription quota."
+    "claude-isolated": "Real Claude Code agents without your personal skills, plugins and CLAUDE.md. Use it for benchmarks against other vendors. Uses your subscription quota.",
+    "agy": "Real Antigravity agents (Gemini 3.8 Flash High) for every role, including the security step. Uses your Antigravity quota."
   },
   "$isolatedNote": "claude-isolated copies ANTHROPIC_BASE_URL and the model from ~/.claude/settings.json (it no longer reads that file). Update both here if you change them there."
 }

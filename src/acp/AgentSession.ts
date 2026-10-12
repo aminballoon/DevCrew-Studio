@@ -53,6 +53,8 @@ export class AgentSession {
   private pending = '';
   private lastCost = 0;
   private context: { used?: number; size?: number } = {};
+  /** Sum of usage_update.used this turn, for agents that report no usage on the prompt response. */
+  private turnStepTokens = 0;
   private exited?: Error;
 
   private constructor(
@@ -110,6 +112,7 @@ export class AgentSession {
     if (this.exited) { throw this.exited; }
     this.text = '';
     const costBefore = this.lastCost;
+    this.turnStepTokens = 0;
     let timer: NodeJS.Timeout | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
@@ -131,7 +134,8 @@ export class AgentSession {
         outputTokens: u?.outputTokens ?? 0,
         cachedReadTokens: u?.cachedReadTokens ?? 0,
         cachedWriteTokens: u?.cachedWriteTokens ?? 0,
-        totalTokens: u?.totalTokens ?? 0,
+        // google-antigravity-acp sends no response usage, only per-model-call totals
+        totalTokens: u?.totalTokens ?? this.turnStepTokens,
         costUsd: Math.max(0, this.lastCost - costBefore),
       };
       this.emit({
@@ -216,6 +220,7 @@ export class AgentSession {
       case 'usage_update':
         // Cost is the session total, not a delta
         this.context = { used: u.used, size: u.size };
+        this.turnStepTokens += u.used ?? 0;
         if (u.cost) { this.lastCost = u.cost.amount; }
         break;
     }
