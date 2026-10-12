@@ -69,7 +69,7 @@ Run with the CLI, profile `claude`, `--auto`, on small projects (requirements an
 |---|---|---|---|---|
 | system-integration | Classroom air-quality monitor | ✅ 16 blocks with real parts, Codex review with 2 high findings (display power vs 3.3 V rail; landed cost vs budget) | 3.5M | $4.20 (scout $3.48) |
 | existing-code | Small inventory library (git repo, worktree mode) | ✅ analyst found the planted bugs (negative `remove`), 3 parts first try, 140/140 tests, branch `devcrew/<runId>` in the project repo | 2.5M | $3.63 |
-| firmware-board | NUCLEO-F446RE skeleton (.ioc, Unity, Makefile, no board) | ⏸ 4 parts pass (87/87 Unity tests, all checks incl. HIL smoke reporting no board). Claude session limit hit in the Firmware reviewer; resumes after the reset | 7.9M | $10.74 so far (QA $4.58) |
+| firmware-board | NUCLEO-F446RE skeleton (.ioc, Unity, Makefile, no board) | ✅ 4 parts pass (87/87 Unity tests, all checks incl. HIL smoke reporting no board). The Claude session limit hit in the Firmware reviewer; resumed after the reset. Review: approve, low findings only (unchecked `HAL_UART_Transmit` return codes); it confirmed generated CubeMX code is untouched outside USER CODE | 8.3M | $11.18 (QA $4.58) |
 
 Found and fixed during the runs:
 - **Verify:** `make test` writes test binaries next to the Unity sources in `tests/`; Verify called them changed locked files, so Dev could never pass. Locked files are now the ones QA handed over (unchanged and present); new files there can only come from the test command, since the scope guard reverts files agents add.
@@ -190,7 +190,7 @@ Seen, not fixed yet:
 - [x] รองรับภาษาอื่นนอกจาก Node/TS ใน Verify (ดู Latest changes: test formats)
 
 ### Presets ใหม่ (existing-code, firmware-board, system-integration)
-- [x] รันทั้ง 3 preset กับ agent จริง (firmware รอ Firmware reviewer หลังโควต้ารีเซ็ต)
+- [x] รันทั้ง 3 preset กับ agent จริง
 - [ ] firmware-board: ทดสอบ HIL rig กับบอร์ดจริง (flash, serial, lock, SSH) ยังไม่เคยรันกับ hardware
 - [ ] เช็คว่า Codex ผ่าน `codex-acp` ค้นเว็บได้ไหม ถ้าได้ เพิ่ม `web` ใน `provides`
 - [ ] ส่งต่อจาก design pipeline ไป build pipeline (ใช้ branch ของ design เป็น source) ตอนนี้ต้องทำเอง
