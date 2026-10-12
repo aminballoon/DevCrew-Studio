@@ -62,6 +62,11 @@
 - Tests: 20 (validator rules, a security step that sends work back once, the minimal pipeline).
 - Not yet: the fake demo agent only has scripts for the built-in roles and `security`, so other new roles write nothing in demo runs. Diagrams of long pipelines get crowded. Gate ids changed from `spec`/`merge` to the step ids (`gate_spec`/`gate_merge`); old runs still display correctly.
 
+## Latest changes (2026-10-12, design and reports on every run)
+- New run-page card **System design and reports**: every version of the system diagram (one tab per role that changed it, e.g. architect then hardware scout with the chosen parts) and one tab per role with what it wrote under `.devcrew/` (Markdown rendered, scripts and JSON folded). It reads the handoffs in the run log, so it works for `--auto` runs, which have no gate payloads, and stays after every gate.
+- The log now keeps up to 200,000 characters of each file under `.devcrew/` (other files 20,000), so long reports such as the scout's options are not cut.
+- Checked on the real runs: the SI run shows diagram v1 and v2 (16 blocks, 10 parts) and three reports; the firmware run shows the board, rig (RIG.md and its scripts) and firmware review.
+
 ## Latest changes (2026-10-12, Resume button)
 - A run whose process ended before it finished (closed terminal, crash, restart) shows as **Stopped** in the run list and the run page, with a **Resume from <step>** button. Failed runs with steps left (for example after a usage limit) get the same button and the reason they stopped.
 - Each driving process records itself in `runs/<id>/owner.json` (pid); a run still driven by a live process, here or a CLI in another terminal, cannot be resumed, so two processes never work on one run.
@@ -88,7 +93,6 @@ Found and fixed during the runs:
 Seen, not fixed yet:
 - One Claude Pro session limit covers roughly two to three such runs. QA and the hardware scout are the expensive roles.
 - Codex reports tokens but no cost (`$0.000`).
-- `--auto` runs emit no gate payloads, so the dashboard cannot show their system diagram or reports at a gate.
 - The guard reports test binaries a reviewer's `make test` creates as blocked files (they are build output; harmless, but noisy).
 - Advisory roles that say `VERDICT: changes` (the Reviewer in existing-code, the architecture reviewer in system-integration) do not stop `--auto`; in a normal run you see them at the last gate.
 

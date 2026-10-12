@@ -360,6 +360,8 @@ function renderRun() {
       <div class="pipeline-wrap" id="flow"></div></section>
     <section class="card" id="arch-card"><div class="card-head"><h3>Code architecture <span class="hint">designed by the Planner, reviewed by you at Gate 1</span></h3><span class="hint" id="arch-status"></span></div>
       <div class="card-body" id="arch"></div></section>
+    <section class="card" id="design-card" hidden><div class="card-head"><h3>System design and reports <span class="hint">what the roles wrote, kept after every gate</span></h3><span class="hint" id="design-status"></span></div>
+      <div class="card-body" id="design"></div></section>
     <section class="card"><div class="card-head"><h3>What happened, in plain words</h3><span class="hint">For anyone, no coding knowledge needed</span></div>
       <div class="card-body" id="story"></div></section>
     <section class="card"><div class="card-head"><h3>Handoffs: who gives what to whom <span class="hint">(technical view)</span></h3><span class="hint">Hover a file to see where it goes · click it to read it</span></div>
@@ -374,6 +376,8 @@ function renderRun() {
     </div>`;
   S.gateKey = null;
   S.archKey = null;
+  S.designKey = null;
+  S.designTab = null;
   update(true);
 }
 
@@ -402,6 +406,7 @@ function update(first = false) {
   ].filter(([l]) => !design || !['Tests passing', 'Fix rounds · Files blocked'].includes(l)).map(([l, v, h]) => `<div class="stat" ${h ? `title="${h}"` : ''}><div class="label">${l}</div><div class="value">${v}</div></div>`).join('');
   $('#flow').innerHTML = renderPipeline(m);
   renderArchCard(m);
+  renderDesignCard(m);
   renderStory(m);
   renderHandoffs(m);
   renderSteps(m, first);
@@ -582,6 +587,58 @@ function renderArchCard(m) {
     ${diffBanner(v, versions[v.version - 2])}
     ${renderArch(v.files, isLatest ? built : null, v.plan, archDiff(versions[v.version - 2], v))}`;
   requestAnimationFrame(() => drawArch(el, v.files));
+}
+
+// ---------- System design and reports: everything the roles wrote under .devcrew/ ----------
+
+/** Every version of the system diagram, in the order roles handed it on. */
+function systemVersions() {
+  const versions = [];
+  for (const e of S.events) {
+    if (e.type !== 'agent_output') continue;
+    const f = e.files.find(x => x.path === '.devcrew/system.json' && x.change !== 'deleted');
+    if (!f?.content) continue;
+    let sys = null;
+    try { sys = JSON.parse(f.content); } catch { continue; }
+    if (!Array.isArray(sys?.blocks) || !Array.isArray(sys?.links)) continue;
+    versions.push({ version: versions.length + 1, seq: e.seq, role: e.role, sys });
+  }
+  return versions;
+}
+
+/** Latest reports per agent step: text files it wrote under .devcrew/ (not the plan, diagram or contracts). */
+function stepReports() {
+  const steps = (DEF?.steps ?? []).filter(x => x.type === 'agent');
+  const files = latestFiles();
+  return steps.flatMap(step => {
+    const own = [...files.values()].filter(f => f.role === step.id && f.path.startsWith('.devcrew/') && f.path !== '.devcrew/system.json' && f.content && !/\.(?:bin|log)$/.test(f.path));
+    return own.length ? [{ step: step.id, name: step.name, files: own.sort((a, b) => (/\.md$/.test(b.path) - /\.md$/.test(a.path)) || a.path.localeCompare(b.path)) }] : [];
+  });
+}
+
+function renderDesignCard(m) {
+  const card = $('#design-card'), el = $('#design');
+  const versions = systemVersions(), reports = stepReports();
+  card.hidden = !versions.length && !reports.length;
+  if (card.hidden) return;
+  const tabs = [
+    ...versions.map(v => ({ id: `v${v.version}`, label: versions.length > 1 ? `Diagram v${v.version} · ${stageOf(v.role).name}` : 'System diagram' })),
+    ...reports.map(r => ({ id: `r:${r.step}`, label: r.name })),
+  ];
+  if (!tabs.some(t => t.id === S.designTab)) S.designTab = versions.length ? `v${versions.at(-1).version}` : tabs[0].id;
+  const key = JSON.stringify([S.designTab, versions.map(v => v.seq), reports.map(r => r.files.map(f => f.seq ?? f.path + f.lines))]);
+  if (key === S.designKey) return;
+  S.designKey = key;
+  const last = versions.at(-1);
+  $('#design-status').textContent = last ? `${plural(last.sys.blocks.length, 'block')} · ${plural(last.sys.links.length, 'link')}${last.sys.blocks.some(b => b.part) ? ` · ${last.sys.blocks.filter(b => b.part).length} with a part chosen` : ''}` : '';
+  const v = versions.find(x => `v${x.version}` === S.designTab);
+  const r = reports.find(x => `r:${x.step}` === S.designTab);
+  el.innerHTML = `<div class="subtabs">${tabs.map(t => `<button type="button" class="${t.id === S.designTab ? 'on' : ''}" data-design-tab="${esc(t.id)}">${esc(t.label)}</button>`).join('')}</div>
+    ${v ? renderSystem(v.sys) : ''}
+    ${r ? r.files.map(f => /\.md$/i.test(f.path)
+      ? `${r.files.length > 1 ? `<div class="hint"><code>${esc(f.path)}</code>${f.truncated ? ' (cut short in the log)' : ''}</div>` : ''}<div class="doc">${md(f.content)}</div>`
+      : `<details class="report-file"><summary><code>${esc(f.path)}</code></summary><pre class="doc">${esc(f.content)}</pre></details>`).join('') : ''}`;
+  el.querySelectorAll('[data-design-tab]').forEach(b => b.addEventListener('click', () => { S.designTab = b.dataset.designTab; S.designKey = null; renderDesignCard(m); }));
 }
 
 // ---------- The same handoffs, in plain words for people who don't write code ----------

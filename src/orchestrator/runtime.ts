@@ -77,6 +77,8 @@ export function checkCapabilities(cfg: DevcrewConfig, profile: string, def: Pipe
 const scopeOf = (ctx: TurnContext): Scope => ctx.scope ?? ROLE_SCOPES[ctx.role] ?? { write: [], deny: [] };
 
 const MAX_HANDOFF_CHARS = 20_000;
+/** Reports and designs under .devcrew/ are what you review, so the log keeps more of them. */
+const MAX_REPORT_CHARS = 200_000;
 
 /**
  * Run one agent turn under the role's scope, then undo anything it changed outside that scope.
@@ -116,12 +118,13 @@ function handoff(before: Snapshot, after: Snapshot): HandoffFile[] {
     if (!buf) { return { path, change: 'deleted' as const, lines: 0 }; }
     const text = buf.toString('utf8');
     const binary = text.includes('\u0000');
+    const max = path.startsWith('.devcrew/') ? MAX_REPORT_CHARS : MAX_HANDOFF_CHARS;
     return {
       path,
       change: before.has(path) ? 'modified' as const : 'added' as const,
       lines: binary ? 0 : text.split('\n').length,
-      content: binary ? undefined : text.slice(0, MAX_HANDOFF_CHARS),
-      truncated: !binary && text.length > MAX_HANDOFF_CHARS,
+      content: binary ? undefined : text.slice(0, max),
+      truncated: !binary && text.length > max,
     };
   });
 }
