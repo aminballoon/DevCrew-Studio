@@ -1,0 +1,20 @@
+{
+  "id": "multi-security-blind",
+  "code": "EB",
+  "name": "AI team \u00b7 security review, role skills, blind QA",
+  "summary": "The security-review team with role skills, where QA keeps the real tests from Dev until Verify judges the work.",
+  "agents": 5,
+  "steps": [
+    "Planner plans around the risks",
+    "QA writes a small contract test Dev can see, and hidden acceptance tests",
+    "Dev codes one module at a time from the requirement",
+    "System runs the hidden tests \u2192 Dev sees only which behaviours fail (max 5 rounds)",
+    "Security reviewer scans with Semgrep and audits \u2192 back to Dev (max 2 rounds)",
+    "Reviewer checks every requirement sentence \u2192 back to Dev (max 1 round)"
+  ],
+  "role": "candidate",
+  "color": "#7c2d12",
+  "mode": "pipeline",
+  "pipeline": "with-security-blind",
+  "profile": "claude"
+}

@@ -1,0 +1,87 @@
+{
+  "id": "with-security-blind",
+  "name": "Team with security review, role skills and blind QA",
+  "description": "The security-review team with role skills, where QA keeps the real tests from Dev: Dev builds from the requirement and only learns which behaviours fail, so the tests check Dev's work independently instead of steering it.",
+  "steps": [
+    {
+      "type": "planner",
+      "id": "planner",
+      "guide": "guide:risk-planner"
+    },
+    {
+      "type": "gate",
+      "id": "gate_spec",
+      "title": "Review the spec and plan",
+      "review": "plan",
+      "reviseTo": "planner"
+    },
+    {
+      "type": "qa",
+      "id": "qa",
+      "guide": "guide:test-engineer",
+      "blind": true
+    },
+    {
+      "type": "build",
+      "id": "build",
+      "guide": "guide:careful-developer"
+    },
+    {
+      "type": "agent",
+      "id": "security",
+      "name": "Security reviewer",
+      "purpose": "Scans the code with Semgrep and audits it by hand for misuse and data leaks, and sends it back to Dev if something is risky.",
+      "agent": "codex",
+      "instructions": "guide:security-auditor",
+      "reads": [
+        "git diff",
+        ".devcrew/PRD.md",
+        "contracts/"
+      ],
+      "mayWrite": [
+        ".devcrew/security.md"
+      ],
+      "produces": [
+        ".devcrew/security.md: a verdict and security findings by severity"
+      ],
+      "verdict": {
+        "file": ".devcrew/security.md",
+        "onChanges": "dev",
+        "maxRounds": 2
+      },
+      "needs": [
+        "shell"
+      ]
+    },
+    {
+      "type": "agent",
+      "id": "reviewer",
+      "name": "Reviewer",
+      "purpose": "Checks the code against every sentence of the requirement and sends it back to Dev once if something is missing.",
+      "instructions": "guide:requirement-reviewer",
+      "reads": [
+        "git diff",
+        ".devcrew/PRD.md",
+        "contracts/"
+      ],
+      "mayWrite": [
+        ".devcrew/review.md"
+      ],
+      "produces": [
+        ".devcrew/review.md: a verdict and findings by severity"
+      ],
+      "verdict": {
+        "file": ".devcrew/review.md",
+        "onChanges": "dev",
+        "maxRounds": 1
+      }
+    },
+    {
+      "type": "gate",
+      "id": "gate_merge",
+      "title": "Approve the merge",
+      "review": "code",
+      "reviseTo": "build"
+    }
+  ]
+}

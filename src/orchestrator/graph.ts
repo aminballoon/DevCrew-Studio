@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import { cpSync, existsSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { Annotation, END, interrupt, START, StateGraph } from '@langchain/langgraph';
 
+import { runDir } from '../core/config';
 import { usageByRole, type GateId } from '../core/events';
 import { entryNode, loadPipeline, SYSTEM_DIAGRAM, type AgentStep, type GateStep, type PipelineDef, type Step } from '../pipeline/schema';
 import { captureBaseline, countDeclaredTests, verify, type TestBaseline, type VerifyResult } from '../guard/verify';
@@ -99,6 +102,32 @@ function gate(s: S, gateId: GateId, payload: Record<string, unknown>): GateAnswe
 // --- Nodes ---
 
 /** The role guide text a built-in step carries in this run, if any. */
+// --- Blind QA: acceptance tests live outside the workspace except while QA writes them or Verify runs them ---
+
+const isBlind = (def: PipelineDef) => def.steps.some(x => x.type === 'qa' && x.blind === true);
+const ACCEPTANCE = 'acceptance';
+const acceptanceStore = (s: S) => join(runDir(s.runId), ACCEPTANCE);
+
+/** Takes acceptance/ out of the workspace, so Dev cannot read it. */
+function hideAcceptance(s: S): void {
+  const inWorkspace = join(s.workspace!.path, ACCEPTANCE);
+  if (!existsSync(inWorkspace)) { return; }
+  rmSync(acceptanceStore(s), { recursive: true, force: true });
+  cpSync(inWorkspace, acceptanceStore(s), { recursive: true });
+  rmSync(inWorkspace, { recursive: true, force: true });
+}
+
+/** Puts acceptance/ back, for QA to fix a test, for Verify to judge, or for the final commit. */
+function showAcceptance(s: S): void {
+  if (!existsSync(acceptanceStore(s))) { return; }
+  const inWorkspace = join(s.workspace!.path, ACCEPTANCE);
+  rmSync(inWorkspace, { recursive: true, force: true });
+  cpSync(acceptanceStore(s), inWorkspace, { recursive: true });
+}
+
+/** The same command run against acceptance/ instead of tests/; null when the command does not name tests/. */
+const acceptanceCommand = (command: string) => (command.includes('tests/') ? command.replaceAll('tests/', `${ACCEPTANCE}/`) : null);
+
 const guideOf = (def: PipelineDef, type: 'planner' | 'qa' | 'build') => {
   const step = def.steps.find(x => x.type === type);
   return step && 'guideText' in step ? step.guideText : undefined;
@@ -128,9 +157,16 @@ const qa = (def: PipelineDef) => node('qa', async s => {
   closeSessions(s.runId, 'dev');
   const earlier = reportPaths(def, def.steps.findIndex(x => x.type === 'qa'));
   const io = { from: ['You: the requirement', 'Planner: spec, contracts and module list'], reads: [...PLAN_FILES, ...earlier], to: ['Dev (build against them)', 'Verify (judge with them)'] };
-  await agentTurn(ctx(s, 'qa', io), qaPrompt(s.plan!, earlier, s.requirement, requirementClauses(s.requirement), guideOf(def, 'qa')));
+  const blind = isBlind(def);
+  await agentTurn(ctx(s, 'qa', io), qaPrompt(s.plan!, earlier, s.requirement, requirementClauses(s.requirement), guideOf(def, 'qa'), { blind }));
   if (countDeclaredTests(s.workspace!.path) === 0) {
     await agentTurn(ctx(s, 'qa', { ...io, from: ['System: no tests were found'] }), 'No test cases were found under tests/. Write the tests now.');
+  }
+  if (blind) {
+    if (countDeclaredTests(s.workspace!.path, `${ACCEPTANCE}/`) === 0) {
+      await agentTurn(ctx(s, 'qa', { ...io, from: ['System: no acceptance tests were found'] }), `No test cases were found under ${ACCEPTANCE}/. Write the acceptance tests now.`);
+    }
+    hideAcceptance(s);
   }
   const baseline = captureBaseline(s.workspace!.path);
   if (baseline.declared === 0) { throw new Error('QA wrote no tests'); }
@@ -147,7 +183,10 @@ export const MAX_DISPUTES = 2;
 const qaDispute = (def: PipelineDef) => node('qa', async s => {
   const module = s.plan!.modules[s.moduleIndex];
   const io = { from: ['Dev: a test it says cannot be passed'], reads: [...PLAN_FILES, `tests/${module.id}/`], to: ['Dev (tries again)'] };
+  const blind = isBlind(def);
+  if (blind) { showAcceptance(s); }
   const turn = await agentTurn(ctx(s, 'qa', io), qaDisputePrompt(module, s.specIssue ?? '', s.lastVerify, s.requirement, requirementClauses(s.requirement)));
+  if (blind) { hideAcceptance(s); }
   const disputes = { ...s.disputes, [module.id]: (s.disputes[module.id] ?? 0) + 1 };
   const planIssue = turn.text.match(/^PLAN_ISSUE:\s*(.+)$/m)?.[1];
   if (planIssue) {
@@ -177,7 +216,7 @@ const dev = (def: PipelineDef) => node('dev', async s => {
     reads: ['.devcrew/PRD.md', 'contracts/', `tests/${module.id}/`, ...earlier],
     to: ['Verify'],
   };
-  const turn = await agentTurn(ctx(s, 'dev', io, module.id), devPrompt(s.plan!, module, attempt, s.lastVerify, s.feedback, earlier, s.requirement, requirementClauses(s.requirement), guideOf(def, 'build')));
+  const turn = await agentTurn(ctx(s, 'dev', io, module.id), devPrompt(s.plan!, module, attempt, s.lastVerify, s.feedback, earlier, s.requirement, requirementClauses(s.requirement), guideOf(def, 'build'), { blind: isBlind(def) }));
   const issue = turn.text.match(/^SPEC_ISSUE:\s*(.+)$/m)?.[1] ?? null;
   return {
     attempt,
@@ -186,7 +225,7 @@ const dev = (def: PipelineDef) => node('dev', async s => {
   };
 }, s => ({ module: s.plan!.modules[s.moduleIndex].id, attempt: s.attempt + 1 }));
 
-const verifyNode = node('verify', async s => {
+const verifyNode = (def: PipelineDef) => node('verify', async s => {
   const plan = s.plan!;
   const ws = s.workspace!.path;
   const module = plan.modules[s.moduleIndex];
@@ -200,12 +239,44 @@ const verifyNode = node('verify', async s => {
     commands.push(plan.moduleTestCommand.replaceAll('{module}', module.id));
     runs.push(await verify({ workspace: ws, testCommand: commands[0], baseline: s.baseline!, expectedTests: moduleTests, testFormats: plan.testFormats }));
   }
+  // Blind QA: the hidden acceptance tests judge the module too, and only exist in the workspace meanwhile
+  let acceptanceModuleRun = false;
+  if (isBlind(def)) {
+    showAcceptance(s);
+    try {
+      const moduleCommand = plan.moduleTestCommand && acceptanceCommand(plan.moduleTestCommand.replaceAll('{module}', module.id));
+      const moduleAcceptance = countDeclaredTests(ws, `${ACCEPTANCE}/${module.id}/`);
+      if (moduleCommand && moduleAcceptance > 0) {
+        commands.push(moduleCommand);
+        runs.push(await verify({ workspace: ws, testCommand: moduleCommand, baseline: s.baseline!, expectedTests: moduleAcceptance, testFormats: plan.testFormats }));
+        acceptanceModuleRun = true;
+      }
+      // The last module is also judged by every module's acceptance tests (regressions)
+      const allCommand = acceptanceCommand(plan.testCommand);
+      if (isLast && allCommand) {
+        commands.push(allCommand);
+        runs.push(await verify({ workspace: ws, testCommand: allCommand, baseline: s.baseline!, expectedTests: countDeclaredTests(ws, `${ACCEPTANCE}/`), testFormats: plan.testFormats }));
+      } else if (isLast && plan.moduleTestCommand) {
+        for (const other of plan.modules.filter(m => m.id !== module.id)) {
+          const command = acceptanceCommand(plan.moduleTestCommand.replaceAll('{module}', other.id));
+          const expected = countDeclaredTests(ws, `${ACCEPTANCE}/${other.id}/`);
+          if (!command || expected === 0) { continue; }
+          commands.push(command);
+          runs.push(await verify({ workspace: ws, testCommand: command, baseline: s.baseline!, expectedTests: expected, testFormats: plan.testFormats }));
+        }
+      } else if (!allCommand && !plan.moduleTestCommand) {
+        getBus().emit(s.runId, { type: 'log', level: 'warn', message: `Neither test command names tests/, so the acceptance tests cannot be run: ${plan.testCommand}` });
+      }
+    } finally {
+      hideAcceptance(s);
+    }
+  }
   if (isLast || runs.length === 0) {
     commands.push(plan.testCommand, ...(isLast ? plan.checks ?? [] : []).map(c => c.command));
     runs.push(await verify({ workspace: ws, testCommand: plan.testCommand, baseline: s.baseline!, checks: isLast ? plan.checks : [], testFormats: plan.testFormats }));
   }
   // Without per-module tests, earlier modules cannot pass alone: only judge at the end
-  const deferred = runs.length === 1 && !isLast && !(plan.moduleTestCommand && moduleTests > 0);
+  const deferred = runs.length === 1 && !isLast && !(plan.moduleTestCommand && moduleTests > 0) && !acceptanceModuleRun;
   const result: VerifyResult = {
     passed: deferred || runs.every(r => r.passed),
     tests: runs[runs.length - 1].tests,
@@ -327,6 +398,8 @@ const gateNode = (def: PipelineDef, step: GateStep) => async (s: S): Promise<U> 
   const answer = gate(s, step.id, { kind: step.review, title: step.title, ...payload });
   if (answer.decision === 'approve') {
     if (isLast) {
+      // The acceptance tests stay with the code, for whoever changes it next
+      if (isBlind(def)) { showAcceptance(s); }
       commitAll(s.workspace!, `DevCrew run ${s.runId}: ${s.requirement.split('\n')[0].slice(0, 60)}`);
       return { decision: 'approve', status: 'approved' };
     }
@@ -390,7 +463,7 @@ export function buildGraph(def: PipelineDef = loadPipeline('standard')) {
       case 'build': {
         const after = nextNode('build');
         const hasQa = steps.some(x => x.type === 'qa');
-        g.addNode('dev', dev(def)).addNode('verify', verifyNode).addNode('escalate', escalate)
+        g.addNode('dev', dev(def)).addNode('verify', verifyNode(def)).addNode('escalate', escalate)
           .addConditionalEdges('dev', (s: S) => {
             if (!s.specIssue) { return 'verify'; }
             const module = s.plan!.modules[s.moduleIndex].id;

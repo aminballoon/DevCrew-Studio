@@ -8,8 +8,8 @@ export interface Scope { write: string[]; deny: string[] }
 
 export const ROLE_SCOPES: Record<string, Scope> = {
   planner: { write: ['.devcrew/', 'contracts/'], deny: [] },
-  qa: { write: ['tests/'], deny: [] },
-  dev: { write: ['*'], deny: ['tests/', 'contracts/', '.devcrew/'] },
+  qa: { write: ['tests/', 'acceptance/'], deny: [] },
+  dev: { write: ['*'], deny: ['tests/', 'acceptance/', 'contracts/', '.devcrew/'] },
   reviewer: { write: ['.devcrew/review.md'], deny: [] },
   single: { write: ['*'], deny: [] },
 };

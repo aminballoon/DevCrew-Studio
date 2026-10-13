@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -264,4 +264,30 @@ test('a disputed test goes back to QA, not to a new plan', { timeout: 60_000 }, 
   assert.deepEqual(stages, ['planner', 'qa', 'dev:cart-core', 'qa:cart-core', 'dev:cart-core', 'verify:cart-core', 'dev:discounts', 'verify:discounts', 'reviewer']);
   // QA's corrected test is the locked version Verify judged with
   assert.deepEqual(events.flatMap(e => (e.type === 'verify_result' ? [e.passed] : [])), [true, true]);
+});
+
+test('blind QA keeps the acceptance tests away from Dev and judges with them', { timeout: 60_000 }, async () => {
+  const minimal = loadPipeline('minimal');
+  const def: PipelineDef = { ...minimal, id: 'blind-test', steps: minimal.steps.map(s => (s.type === 'qa' ? { ...s, blind: true } : s)) };
+  const runs = new RunManager();
+  const seen: boolean[] = [];
+  let workspace = '';
+  getBus().subscribe(e => {
+    if (e.type === 'run_started') { workspace = e.workspace; }
+    if (e.type === 'node_started' && e.node === 'dev' && workspace) { seen.push(existsSync(join(workspace, 'acceptance'))); }
+  });
+  const runId = runs.start({ requirement: readFileSync(join(TASK, 'requirement.md'), 'utf8'), source: join(TASK, 'seed'), profile: 'fake-blind', autoApprove: true, pipeline: def });
+  const status = await runs.waitFor(runId);
+  const events = getBus().read(runId);
+  assert.equal(status, 'approved', JSON.stringify(events.filter(e => e.type === 'log')));
+  assert.ok(seen.length >= 3 && seen.every(x => x === false), 'Dev never had acceptance/ in its workspace');
+  // The contract test passed, a hidden acceptance test caught the bug, and its failure reached Dev
+  const verifies = events.filter(e => e.type === 'verify_result');
+  assert.deepEqual(verifies.map(v => v.type === 'verify_result' && v.passed), [false, true, true]);
+  assert.ok(verifies[0].type === 'verify_result' && verifies[0].commands?.some(c => c.includes('acceptance/cart-core')));
+  const secondDev = events.filter(e => e.type === 'agent_input' && e.role === 'dev')[1];
+  assert.ok(secondDev?.type === 'agent_input' && secondDev.prompt.includes('AC-1'), 'Dev sees which hidden behaviour failed');
+  assert.ok(secondDev?.type === 'agent_input' && secondDev.prompt.includes('kept from you'));
+  // The tests stay with the code for whoever changes it next
+  assert.ok(existsSync(join(workspace, 'acceptance/cart-core/cart.test.ts')));
 });

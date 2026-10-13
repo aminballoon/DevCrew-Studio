@@ -17,7 +17,14 @@ export type Step = PlannerStep | QaStep | BuildStep | GateStep | AgentStep;
  */
 interface WithGuide { guide?: string; guideText?: string }
 export interface PlannerStep extends WithGuide { type: 'planner'; id: 'planner' }
-export interface QaStep extends WithGuide { type: 'qa'; id: 'qa' }
+export interface QaStep extends WithGuide {
+  type: 'qa'; id: 'qa';
+  /**
+   * Blind QA: most tests (acceptance/) are kept away from Dev and only run when Verify judges the
+   * work, so Dev builds from the requirement, not from the tests. Dev sees which behaviours fail.
+   */
+  blind?: boolean;
+}
 export interface BuildStep extends WithGuide {
   type: 'build';
   id: 'build';
@@ -214,6 +221,7 @@ export function validatePipeline(raw: unknown): string[] {
         errors.push(`${where}: a plan review sends feedback to "planner" or to an agent step before "build".`);
       }
     }
+    if (s.type === 'qa' && s.blind !== undefined && typeof s.blind !== 'boolean') { errors.push(`${where}: "blind" must be true or false.`); }
     if ((s.type === 'planner' || s.type === 'qa' || s.type === 'build') && s.guide !== undefined) {
       const guide = guideName(s.guide);
       if (!guide) { errors.push(`${where}: "guide" must be "guide:<name>" (lowercase letters, digits and -).`); }

@@ -75,7 +75,7 @@ ${clauseList(clauses).split('\n').map(l => `   ${l}`).join('\n')}
 End with a short summary of the plan.`;
 }
 
-export function qaPrompt(plan: Plan, earlier: string[] = [], requirement = '', clauses: Clause[] = [], guide?: string): string {
+export function qaPrompt(plan: Plan, earlier: string[] = [], requirement = '', clauses: Clause[] = [], guide?: string, opts: { blind?: boolean } = {}): string {
   return `${header('qa')}
 You are the QA engineer. Read .devcrew/PRD.md and contracts/. The developer has not written any code yet.
 ${earlierReports(earlier)}
@@ -96,12 +96,18 @@ Rules:
 - When tests/ already has tests, they cover what the project does today. Write tests only for what this change adds or changes, and update the existing tests this change makes wrong. Do not rewrite or duplicate the others.
 - Every test must agree with the requirement and with every other test. Before finishing, run the suite once against the empty implementation and read each failure message to check that it fails for the reason you intend.
 
-${roleGuide(guide)}
+${opts.blind ? `${BLIND_QA}\n` : ''}${roleGuide(guide)}
 After you finish, these files are locked: the developer cannot change them.
 End with a list of the test files and which ACs ${requirement ? 'and requirement clauses ' : ''}each covers.`;
 }
 
-export function devPrompt(plan: Plan, module: PlanModule, attempt: number, last: VerifyResult | null, feedback: string | null, earlier: string[] = [], requirement = '', clauses: Clause[] = [], guide?: string): string {
+/** Blind QA: the real tests are written for the judge, not for the developer. */
+const BLIND_QA = `Blind QA: the developer will not see most of your tests.
+- Write the acceptance tests, the real check of every clause and criterion, under acceptance/<module>/ (for example acceptance/X/main.test.ts), mirroring the planned test files. They are taken away before the developer starts and only run when the work is judged. The developer then sees only the names and failure messages of failing tests, so name each test after the behaviour it checks (AC-n, R-n and what must happen), and give assertions clear messages.
+- Under tests/<module>/ write only a small contract test (one to three tests): the module's exports exist and one basic call works. It shows the developer the shape of the API, not the rules.
+- Acceptance tests run with the test command, with tests/ replaced by acceptance/. Import code and shared helpers with paths that work from acceptance/<module>/.`;
+
+export function devPrompt(plan: Plan, module: PlanModule, attempt: number, last: VerifyResult | null, feedback: string | null, earlier: string[] = [], requirement = '', clauses: Clause[] = [], guide?: string, opts: { blind?: boolean } = {}): string {
   const failure = attempt > 1 && last && !last.passed
     ? `\nYour previous attempt did not pass verification:\n${last.reasons.map(r => `- ${r}`).join('\n')}\n\nTest output (tail):\n\`\`\`\n${last.output.slice(-4000)}\n\`\`\`\nFix the code. The tests are correct by definition here; do not try to change them.\n`
     : '';
@@ -109,7 +115,7 @@ export function devPrompt(plan: Plan, module: PlanModule, attempt: number, last:
 You are the Developer. Implement module "${module.id}": ${module.title}
 ${module.description}
 
-Read .devcrew/PRD.md, contracts/ and the tests in tests/${module.id}/ first.
+Read .devcrew/PRD.md, contracts/ and the tests in tests/${module.id}/ first.${opts.blind ? '\nMost of QA\'s tests are kept from you and run when your work is judged. Build what the requirement clauses and the PRD say, not only what tests/ shows. When a hidden test fails you see its name and failure message: fix the behaviour it names.' : ''}
 ${earlierReports(earlier)}${requirement ? `\n${sourceOfTruth(requirement, clauses)}Passing the tests is necessary but not enough: the code must also do everything the clauses for this module say.\n` : ''}
 Planned files for this module (stick to this architecture; mention any file you had to add and why):
 ${filesFor(plan, module.id, ['source', 'config']).map(f => `- ${f.path}: ${f.purpose}${f.exports.length ? ` Exports: ${f.exports.join(', ')}.` : ''}${f.dependsOn.length ? ` Uses: ${f.dependsOn.join(', ')}.` : ''}`).join('\n') || '- (none listed)'}
