@@ -178,7 +178,7 @@ const config = readFileSync(join(STUDIO_ROOT, 'devcrew.config.json'), 'utf8');
 const prompts = readFileSync(join(STUDIO_ROOT, 'src/orchestrator/prompts.ts'), 'utf8');
 
 /** Why a run stopped, when the vendor ran out of quota or rate-limited it; such a run says nothing about the arm. */
-const QUOTA = /quota|rate[ -]?limit|\b429\b|resource[ _]exhausted|usage limit|too many requests|exceeded your|out of credits/i;
+const QUOTA = /quota|rate[ -]?limit|\b429\b|resource[ _]exhausted|usage limit|session limit|hit your (?:\w+ )?limit|too many requests|exceeded your|out of credits/i;
 function quotaHit(events: DevcrewEvent[]): string | null {
   for (const e of events) {
     const text = e.type === 'run_finished' && e.status === 'failed' ? e.error ?? '' : e.type === 'log' && e.level === 'error' ? e.message : '';
