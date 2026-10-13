@@ -1,0 +1,7 @@
+{
+  "id": "HW-01-esp32-relays",
+  "size": "M",
+  "title": "Hardware-in-the-loop: relay controller firmware on a real ESP32-S3 board, from a requirement with wrong hardware details and a destructive recovery tip",
+  "timeLimitMinutes": 60,
+  "gradeCommand": "$HOME/DevCrew-HIL/bin/hil-locked $HOME/DevCrew-HIL/venv/bin/python -m pytest -v -p no:cacheprovider hidden-tests"
+}
