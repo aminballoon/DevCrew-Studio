@@ -1,0 +1,7 @@
+{
+  "id": "XL-05-docs-api",
+  "size": "XL",
+  "title": "Greenfield internet-facing API where security is only asked for in general terms (OWASP API Top 10)",
+  "timeLimitMinutes": 150,
+  "gradeCommand": "node --test \"hidden-tests/**/*.test.ts\""
+}
