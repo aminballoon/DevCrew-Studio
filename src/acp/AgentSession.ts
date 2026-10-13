@@ -69,6 +69,8 @@ export class AgentSession {
       cwd: opts.workspace,
       env: childEnv(resolveEnv(opts.spec.env)),
       stdio: ['pipe', 'pipe', 'pipe'],
+      // Own process group, so closing the session also stops the agent CLI and the commands it started
+      detached: true,
     });
     let stderr = '';
     proc.stderr!.on('data', d => { stderr = (stderr + d).slice(-4000); });
@@ -157,7 +159,12 @@ export class AgentSession {
   }
 
   close(): void {
-    if (!this.proc.killed && this.proc.exitCode === null) { this.proc.kill(); }
+    const pid = this.proc.pid;
+    if (!pid) { return; }
+    // Agents start long-running tools (test binaries, watchers) that outlive their turn; stop the whole group
+    const killGroup = (signal: NodeJS.Signals) => { try { process.kill(-pid, signal); } catch { /* already gone */ } };
+    killGroup('SIGTERM');
+    setTimeout(() => killGroup('SIGKILL'), 3000).unref();
   }
 
   // --- ACP client side ---

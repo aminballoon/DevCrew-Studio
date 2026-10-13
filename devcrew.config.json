@@ -55,13 +55,15 @@
       "args": [
         "-y",
         "google-antigravity-acp@2.0.1",
+        "--binary-path",
+        "agents/agy-no-print-timeout.sh",
         "--model",
         "gemini-3.8-flash-high"
       ],
       "provides": [
         "shell"
       ],
-      "note": "Antigravity CLI (agy) through the google-antigravity-acp adapter (third-party, MIT, same one vscode-acp uses). Needs agy on PATH and logged in. The adapter auto-approves agy tool calls; DevCrew guards file scope. Version pinned for benchmarks."
+      "note": "Antigravity CLI (agy) through the google-antigravity-acp adapter (third-party, MIT, same one vscode-acp uses). Needs agy on PATH and logged in. The adapter auto-approves agy tool calls; DevCrew guards file scope. Version pinned for benchmarks. agents/agy-no-print-timeout.sh lifts the adapter fixed 60-min agy timeout; DevCrew enforces its own limits."
     },
     "fake": {
       "command": "node",

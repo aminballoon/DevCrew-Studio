@@ -2,6 +2,13 @@
 
 อัปเดตล่าสุด: 2026-10-12
 
+## Latest changes (2026-10-13, morning: more harness fixes found while the suites ran)
+- **node_modules was replaced by a symlink on merge:** a worktree's `node_modules` symlink had been committed (`.gitignore` said `node_modules/`, which matches folders only). The merge into main deleted the real folder; the post-v1 runs failed at once. Untracked it, `.gitignore` now says `node_modules`, reinstalled with `npm ci`. No results were lost.
+- **agy turns were capped at 60 min by the adapter:** `google-antigravity-acp` always passes `--print-timeout=60m`. The rerun of arm A on L-04 stopped at exactly 60 min with unfinished code (hidden 0/0, compile errors). `agents/agy-no-print-timeout.sh` now starts agy with `--print-timeout=0`; DevCrew's own turn and task limits apply. Team runs were not affected (DevCrew cuts their turns at 30 min). Arm A on L-04 needs another rerun.
+- **Leftover processes:** closing a session killed only the adapter, so commands the agent had started (a hung test binary for 55 min, agy processes from a day earlier, ten fake agents from test runs) kept running and competed for CPU, including during perf probes. Sessions now run in their own process group and closing one stops the whole group (TERM, then KILL after 3 s). Covered by `test/session-close.test.ts`, which fails on the old code.
+- Regraded v1 L-04: minimal team and security team both **resolved 16/16**; perf p50 122 / 121 µs, p99 1.38 ms / 0.57 ms, about 290,000 frames/s.
+- Tests: 44.
+
 ## Latest changes (2026-10-13, benchmark harness fixes found on L-04)
 - **Grading:** L-04's perf probe sat with the hidden tests, so it counted as a 17th declared test while only 16 run; no L-04 run could be resolved. The probe now lives in `hidden/perf/` and is copied only for the perf command. Grading clears `hidden-tests/` first.
 - **Perf parsing:** cargo prints `test perf ... ` on the same line as the probe's output; the runner now finds `PERF {json}` anywhere in a line. v1 perf results read as `runs: 0` because of this.
