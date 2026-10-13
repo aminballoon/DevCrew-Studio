@@ -13,7 +13,7 @@ import { agentStepPrompt, devPrompt, plannerPrompt, qaDisputePrompt, qaPrompt } 
 import { requirementClauses } from './requirement';
 import { collectReports, reportPaths } from './reports';
 import { readSystem } from './system';
-import { agentTurn, closeSessions, getBus, getConfig, type TurnContext } from './runtime';
+import { agentTurn, closeSessions, getBus, getConfig, isCancelled, type TurnContext } from './runtime';
 
 export interface GateAnswer { decision: 'approve' | 'revise' | 'retry' | 'replan' | 'abort'; feedback?: string }
 
@@ -51,6 +51,8 @@ export const PipelineState = Annotation.Root({
   lastDevReport: last<string | null>(() => null),
   /** How many times Dev has disputed QA's tests, per module; past the limit a dispute goes to the Planner. */
   disputes: last<Record<string, number>>(() => ({})),
+  /** Times the run went back to the Planner because the build could not go on. */
+  replans: last<number>(() => 0),
   /** Report text of each step with a verdict, by step id. */
   reviews: last<Record<string, string>>(() => ({})),
   /** How many times each step has sent the work back to Dev. */
@@ -70,8 +72,10 @@ type U = typeof PipelineState.Update;
 /** Emits node_started/node_finished around a node, so the dashboard can draw progress. */
 function node(name: string, fn: (s: S) => Promise<U>, detail?: (s: S) => { module?: string; attempt?: number }) {
   return async (s: S): Promise<U> => {
+    if (isCancelled(s.runId)) { throw new Error('Run cancelled'); }
     getBus().emit(s.runId, { type: 'node_started', node: name, ...detail?.(s) });
     const update = await fn(s);
+    if (isCancelled(s.runId)) { throw new Error('Run cancelled'); }
     getBus().emit(s.runId, { type: 'node_finished', node: name });
     return update;
   };
@@ -147,7 +151,7 @@ const planner = (def: PipelineDef) => node('planner', async s => {
   // Two chances to fix a malformed or incomplete plan before failing the run
   for (let fix = 0; ; fix++) {
     try {
-      return { plan: readPlan(s.workspace!.path, clauses), feedback: null, revisedTo: null };
+      return { plan: readPlan(s.workspace!.path, clauses), feedback: null, revisedTo: null, replans: s.plan && !s.revisedTo ? s.replans + 1 : s.replans };
     } catch (e) {
       if (fix === 2) { throw e; }
       await agentTurn(ctx(s, 'planner', { ...io, from: ['System: the plan file was invalid'] }), `Your plan is unusable: ${(e as Error).message}. Fix .devcrew/PRD.md and .devcrew/plan.json.`);
@@ -177,6 +181,16 @@ const qa = (def: PipelineDef) => node('qa', async s => {
 
 /** At most this many test disputes per module go to QA; more mean the plan itself is unclear. */
 export const MAX_DISPUTES = 2;
+
+/**
+ * At most this many trips back to the Planner from the build. A conflict that survives them is
+ * in the requirement or its fixed tests, and only a human can settle it, so the run stops there.
+ */
+export const MAX_REPLANS = 2;
+
+const stuck = node('stuck', async s => {
+  throw new Error(`Stopped after ${s.replans} replans: the requirement or its tests need a human decision. Last problem: ${(s.feedback ?? s.specIssue ?? 'unknown').slice(0, 500)}`);
+});
 
 /**
  * Dev says a test cannot be passed. QA checks it against the requirement and fixes it if it is
@@ -488,15 +502,16 @@ export function buildGraph(def: PipelineDef = loadPipeline('standard')) {
       case 'build': {
         const after = nextNode('build');
         const hasQa = steps.some(x => x.type === 'qa');
-        g.addNode('dev', dev(def)).addNode('verify', verifyNode(def)).addNode('escalate', escalate)
+        const replan = (s: S) => (s.replans >= MAX_REPLANS ? 'stuck' : 'planner');
+        g.addNode('dev', dev(def)).addNode('stuck', stuck).addNode('verify', verifyNode(def)).addNode('escalate', escalate)
           .addConditionalEdges('dev', (s: S) => {
             if (!s.specIssue) { return 'verify'; }
             const module = s.plan!.modules[s.moduleIndex].id;
-            return hasQa && (s.disputes[module] ?? 0) < MAX_DISPUTES ? 'dispute' : 'planner';
-          }, ['verify', 'planner', ...(hasQa ? ['dispute'] : [])]);
+            return hasQa && (s.disputes[module] ?? 0) < MAX_DISPUTES ? 'dispute' : replan(s);
+          }, ['verify', 'planner', 'stuck', ...(hasQa ? ['dispute'] : [])]);
         if (hasQa) {
           g.addNode('dispute', qaDispute(def))
-            .addConditionalEdges('dispute', (s: S) => (s.specIssue ? 'planner' : 'dev'), ['dev', 'planner']);
+            .addConditionalEdges('dispute', (s: S) => (s.specIssue ? replan(s) : 'dev'), ['dev', 'planner', 'stuck']);
         }
         g
           .addConditionalEdges('verify', (s: S) => {
@@ -505,7 +520,7 @@ export function buildGraph(def: PipelineDef = loadPipeline('standard')) {
             if (hasQa && s.specIssue) { return 'dispute'; }
             return s.attempt >= maxAttempts ? 'escalate' : 'dev';
           }, [...new Set([after, 'dev', 'escalate', ...(hasQa ? ['dispute'] : [])])])
-          .addConditionalEdges('escalate', (s: S) => (s.decision === 'retry' ? 'dev' : s.decision === 'replan' ? 'planner' : 'finish'), ['dev', 'planner', 'finish']);
+          .addConditionalEdges('escalate', (s: S) => (s.decision === 'retry' ? 'dev' : s.decision === 'replan' ? replan(s) : 'finish'), ['dev', 'planner', 'stuck', 'finish']);
         break;
       }
       case 'gate': {

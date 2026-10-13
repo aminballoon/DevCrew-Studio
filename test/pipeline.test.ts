@@ -305,3 +305,14 @@ test('blind QA: a hidden test that fails twice in a row goes back to QA to check
   const qaIn = events.filter(e => e.type === 'agent_input' && e.role === 'qa')[1];
   assert.ok(qaIn?.type === 'agent_input' && qaIn.prompt.includes('failed on two attempts in a row'));
 });
+
+test('a conflict the agents cannot settle stops after two replans', { timeout: 90_000 }, async () => {
+  const runs = new RunManager();
+  const runId = runs.start({ requirement: readFileSync(join(TASK, 'requirement.md'), 'utf8'), source: join(TASK, 'seed'), profile: 'fake-conflict', autoApprove: true });
+  const status = await runs.waitFor(runId);
+  const events = getBus().read(runId);
+  assert.equal(status, 'failed');
+  assert.equal(events.filter(e => e.type === 'node_started' && e.node === 'planner').length, 3);
+  const end = events.findLast(e => e.type === 'run_finished');
+  assert.match(end?.type === 'run_finished' ? end.error ?? '' : '', /Stopped after 2 replans: .*need a human/);
+});

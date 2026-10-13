@@ -7,7 +7,7 @@ import { STUDIO_ROOT } from '../../src/core/config';
 import { usageByRole, type DevcrewEvent } from '../../src/core/events';
 import { countDeclaredTests, parseTestCounts, runCommand } from '../../src/guard/verify';
 import { RunManager } from '../../src/orchestrator/RunManager';
-import { closeSessions, getBus } from '../../src/orchestrator/runtime';
+import { cancelRun, closeSessions, getBus } from '../../src/orchestrator/runtime';
 import { runSingle } from '../../src/orchestrator/single';
 import { guidePath } from '../../src/pipeline/schema';
 
@@ -235,7 +235,7 @@ for (const [i, { task, arm, rep }] of matrix.entries()) {
     const deadline = new Promise<'timeout'>(resolve => {
       timer = setTimeout(() => {
         if (runId) {
-          closeSessions(runId);
+          cancelRun(runId);
           getBus().emit(runId, { type: 'run_finished', status: 'failed', error: `Time limit of ${task.timeLimitMinutes} min reached` });
         }
         resolve('timeout');

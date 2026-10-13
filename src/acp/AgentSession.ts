@@ -129,7 +129,11 @@ export class AgentSession {
         reject(new Error(`Turn timed out after ${Math.round(this.opts.turnTimeoutMs / 60000)} min`));
       }, this.opts.turnTimeoutMs);
     });
-    const exited = new Promise<never>((_, reject) => this.proc.once('exit', () => setImmediate(() => reject(this.exited))));
+    let onExit: (() => void) | undefined;
+    const exited = new Promise<never>((_, reject) => {
+      onExit = () => setImmediate(() => reject(this.exited));
+      this.proc.once('exit', onExit);
+    });
     try {
       const response = await Promise.race([
         this.connection.prompt({ sessionId: this.sessionId, prompt: [{ type: 'text', text }] }),
@@ -154,6 +158,8 @@ export class AgentSession {
       return { text: this.text, stopReason: response.stopReason, usage };
     } finally {
       clearTimeout(timer);
+      // One listener per turn; left behind, they pile up on a long-lived session
+      if (onExit) { this.proc.removeListener('exit', onExit); }
       this.flushText();
     }
   }

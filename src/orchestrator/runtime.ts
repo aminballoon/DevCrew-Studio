@@ -139,6 +139,16 @@ function guard(ctx: TurnContext, before: Snapshot): string[] {
   return reverted;
 }
 
+const cancelled = new Set<string>();
+
+/** Stop a run from outside (a time limit): its sessions close and its next step throws. */
+export function cancelRun(runId: string): void {
+  cancelled.add(runId);
+  closeSessions(runId);
+}
+
+export const isCancelled = (runId: string) => cancelled.has(runId);
+
 export function closeSessions(runId: string, role?: Role): void {
   for (const [id, s] of sessions) {
     if (id.startsWith(`${runId}:${role ? role + ':' : ''}`)) { s.close(); sessions.delete(id); }
