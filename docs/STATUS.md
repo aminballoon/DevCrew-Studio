@@ -48,6 +48,13 @@ Found in the L-01 pilot: QA, Dev and the reviewers never saw the customer's requ
 - New task `L-01-booking` (size L, 90 min): multi-organisation meeting room booking with roles, overlap rules, time-zones, a per-member limit and tenant isolation. 33 hidden tests in three files (functions, rules, security). Checked against a reference implementation kept outside the repo (33/33), and each of six planted bugs (no limit, closed intervals, shared objects, viewer may book, anyone may cancel, no time-zone check) fails at least one test.
 - Rust (1.99) is installed on this machine. Shells started before the install, including the one that runs the bench, need `export PATH=$HOME/.cargo/bin:$PATH`.
 
+## Latest changes (2026-10-13, XL task: a change request on a multi-module codebase)
+Every v1–v3 task was solved by a single agent in 9–15 min, so the suite cannot tell setups apart (ceiling effect). `XL-01-shop-returns` is a harder change request:
+- **Seed:** an order-management backend of 38 files / about 3,000 lines (catalog, customers, warehouses with a stock movement ledger, coupons, pricing with discount allocation, orders with a status table, payments and refunds through a fake gateway, shipping, an audit log fed by domain events, an email outbox, sales and stock reports, a router with error mapping and DTOs) plus 39 passing tests. Written for this benchmark, so no model has seen it.
+- **Change request (≈1,100 words):** returns. Customers request, staff approve or reject; approval refunds through the existing payment path (capped at what is left, exact per-line totals across partial returns, half-up, shipping refunded once under a reason rule), restocks resellable units at the line's first warehouse as a `return` movement, moves the order to `partially_returned` / `returned`, gives coupon uses back, publishes events (audit), sends three new emails, and changes the sales report.
+- **Hidden tests:** 79 = 40 new + the 39 old as regression. The untouched seed passes 39; the reference (kept in the scratchpad, outside the repo) passes 79. 35 planted bugs, all caught (rounding, tax, discount, shipping rule, cap, restock target and kind, coupon release, 403 vs 404, window start and edge, unit counting, report, refund path bypass, atomicity on gateway failure, emails, permissions, statuses, validation, leaked owner id).
+- Time limit 150 min. Not run yet.
+
 ## Latest changes (2026-10-12, benchmark task suite for the vendor comparison)
 Five tasks, each with hidden tests checked against a reference implementation kept outside the repo (so agents can never find it), and with planted bugs to make sure the tests catch them:
 
