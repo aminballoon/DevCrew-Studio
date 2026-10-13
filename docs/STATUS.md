@@ -386,3 +386,21 @@ The hypothesis is **not supported**: Haiku 5.5 alone never changed a test, speci
 - **IT-02:** single run 3 told the user the file contained injected instructions and that it ignored them.
 
 An earlier, invalid suite (`integrity-haiku-prefix`) found the unbounded replan loop and the time limit that did not stop runs; both are fixed.
+
+### Roadmap experiment: results (2026-10-14, suite `roadmap-haiku`)
+
+All builds and handoffs used Claude Haiku 5.5, with 2 reps per arm. Handoff costs are the sum over the four rounds, all done by the same `single-vanilla` agent.
+
+| Arm | Build cost (time) | Handoff ×4 cost (time) | Hidden tests failing over R2–R5 |
+|---|---|---|---|
+| A single | $0.09 (3 min), $0.04 (3 min) | $0.36 (12 min), $0.16 (7 min) | 0, 0 |
+| B team | $0.67 (22 min), $0.92 (23 min) | $1.03 (13 min), $0.96 (12 min) | 0, 0 |
+| DS team | $0.88 (23 min), $0.42 (14 min) | $0.93 (13 min), $0.78 (10 min) | 0, 4 |
+
+- **No regressions anywhere.**
+- **DS rep 2:** the handoff agent's R2 broke `formatMoney` for one case, and it stayed broken through R5. DS's own suite also kept one failing test from R1 onward, which is why its runs are "unresolved".
+- **Team code was dearer to extend:** about 2.5–6× the cost of extending single-agent code. The single agent's R1 code was not worse built:
+  - 11 files, largest 91 lines;
+  - against 8–9 files, largest 139–140 lines, for the teams.
+
+The hypothesis is **not supported**.
