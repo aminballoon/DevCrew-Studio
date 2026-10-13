@@ -291,3 +291,17 @@ test('blind QA keeps the acceptance tests away from Dev and judges with them', {
   // The tests stay with the code for whoever changes it next
   assert.ok(existsSync(join(workspace, 'acceptance/cart-core/cart.test.ts')));
 });
+
+test('blind QA: a hidden test that fails twice in a row goes back to QA to check', { timeout: 60_000 }, async () => {
+  const minimal = loadPipeline('minimal');
+  const def: PipelineDef = { ...minimal, id: 'blind-wrong-test', steps: minimal.steps.map(s => (s.type === 'qa' ? { ...s, blind: true } : s)) };
+  const runs = new RunManager();
+  const runId = runs.start({ requirement: readFileSync(join(TASK, 'requirement.md'), 'utf8'), source: join(TASK, 'seed'), profile: 'fake-blind-wrong', autoApprove: true, pipeline: def });
+  const status = await runs.waitFor(runId);
+  const events = getBus().read(runId);
+  assert.equal(status, 'approved', JSON.stringify(events.filter(e => e.type === 'log')));
+  const stages = events.filter(e => e.type === 'node_started').map(e => e.type === 'node_started' && `${e.node}${e.module ? ':' + e.module : ''}`);
+  assert.deepEqual(stages.slice(0, 9), ['planner', 'qa', 'dev:cart-core', 'verify:cart-core', 'dev:cart-core', 'verify:cart-core', 'qa:cart-core', 'dev:cart-core', 'verify:cart-core']);
+  const qaIn = events.filter(e => e.type === 'agent_input' && e.role === 'qa')[1];
+  assert.ok(qaIn?.type === 'agent_input' && qaIn.prompt.includes('failed on two attempts in a row'));
+});

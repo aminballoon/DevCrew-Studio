@@ -47,6 +47,8 @@ export const PipelineState = Annotation.Root({
   lastVerify: last<VerifyResult | null>(() => null),
   allModulesDone: last<boolean>(() => false),
   specIssue: last<string | null>(() => null),
+  /** The end of Dev's last reply, so QA hears Dev's side when checking a hidden test. */
+  lastDevReport: last<string | null>(() => null),
   /** How many times Dev has disputed QA's tests, per module; past the limit a dispute goes to the Planner. */
   disputes: last<Record<string, number>>(() => ({})),
   /** Report text of each step with a verdict, by step id. */
@@ -222,6 +224,7 @@ const dev = (def: PipelineDef) => node('dev', async s => {
     attempt,
     feedback: issue ? `The developer reported a spec issue in module "${module.id}": ${issue}` : null,
     specIssue: issue,
+    lastDevReport: turn.text.trim().slice(-1500),
   };
 }, s => ({ module: s.plan!.modules[s.moduleIndex].id, attempt: s.attempt + 1 }));
 
@@ -287,8 +290,30 @@ const verifyNode = (def: PipelineDef) => node('verify', async s => {
   if (result.passed && !isLast) {
     return { lastVerify: result, moduleIndex: s.moduleIndex + 1, attempt: 0, feedback: null };
   }
+  // Blind QA: Dev cannot see a hidden test to argue with it. When the same tests fail twice in a
+  // row, QA checks them against the requirement before Dev tries again.
+  if (!result.passed && isBlind(def) && s.lastVerify && !s.lastVerify.passed && (s.disputes[module.id] ?? 0) < MAX_DISPUTES) {
+    const now = failingTests(result.output);
+    const before = failingTests(s.lastVerify.output);
+    if (now.length && now.length === before.length && now.every(t => before.includes(t))) {
+      return {
+        lastVerify: result, allModulesDone: false, feedback: null,
+        specIssue: `The same hidden test${now.length > 1 ? 's' : ''} failed on two attempts in a row, and the developer cannot see ${now.length > 1 ? 'them' : 'it'}: ${now.join('; ')}. The developer's last report:\n${s.lastDevReport ?? '(none)'}`,
+      };
+    }
+  }
   return { lastVerify: result, allModulesDone: result.passed && isLast, feedback: null };
 }, s => ({ module: s.plan!.modules[s.moduleIndex].id, attempt: s.attempt }));
+
+/** Names of failing tests in node --test style output (✖ name (time)). */
+function failingTests(output: string): string[] {
+  const names = new Set<string>();
+  for (const line of output.split('\n')) {
+    const m = line.match(/^\s*✖ (.+) \([\d.]+m?s\)$/);
+    if (m && m[1] !== 'failing tests:') { names.add(m[1]); }
+  }
+  return [...names];
+}
 
 const escalate = async (s: S): Promise<U> => {
   const module = s.plan!.modules[s.moduleIndex];
@@ -477,8 +502,9 @@ export function buildGraph(def: PipelineDef = loadPipeline('standard')) {
           .addConditionalEdges('verify', (s: S) => {
             if (s.allModulesDone) { return after; }
             if (s.lastVerify?.passed) { return 'dev'; }
+            if (hasQa && s.specIssue) { return 'dispute'; }
             return s.attempt >= maxAttempts ? 'escalate' : 'dev';
-          }, [...new Set([after, 'dev', 'escalate'])])
+          }, [...new Set([after, 'dev', 'escalate', ...(hasQa ? ['dispute'] : [])])])
           .addConditionalEdges('escalate', (s: S) => (s.decision === 'retry' ? 'dev' : s.decision === 'replan' ? 'planner' : 'finish'), ['dev', 'planner', 'finish']);
         break;
       }

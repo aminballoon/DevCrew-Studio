@@ -115,7 +115,7 @@ export function devPrompt(plan: Plan, module: PlanModule, attempt: number, last:
 You are the Developer. Implement module "${module.id}": ${module.title}
 ${module.description}
 
-Read .devcrew/PRD.md, contracts/ and the tests in tests/${module.id}/ first.${opts.blind ? '\nMost of QA\'s tests are kept from you and run when your work is judged. Build what the requirement clauses and the PRD say, not only what tests/ shows. When a hidden test fails you see its name and failure message: fix the behaviour it names.' : ''}
+Read .devcrew/PRD.md, contracts/ and the tests in tests/${module.id}/ first.${opts.blind ? '\nMost of QA\'s tests are kept from you and run when your work is judged. Build what the requirement clauses and the PRD say, not only what tests/ shows. When a hidden test fails you see its name and failure message: fix the behaviour it names. You cannot read hidden tests and must not look for them. If you are sure a hidden test is wrong, start a line with "SPEC_ISSUE:" naming the test and why; QA will check it.' : ''}
 ${earlierReports(earlier)}${requirement ? `\n${sourceOfTruth(requirement, clauses)}Passing the tests is necessary but not enough: the code must also do everything the clauses for this module say.\n` : ''}
 Planned files for this module (stick to this architecture; mention any file you had to add and why):
 ${filesFor(plan, module.id, ['source', 'config']).map(f => `- ${f.path}: ${f.purpose}${f.exports.length ? ` Exports: ${f.exports.join(', ')}.` : ''}${f.dependsOn.length ? ` Uses: ${f.dependsOn.join(', ')}.` : ''}`).join('\n') || '- (none listed)'}

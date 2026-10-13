@@ -144,6 +144,15 @@
       "env": {
         "FAKE_SCRIPT": "agents/scripts/cart-blind.mjs"
       }
+    },
+    "fake-blind-wrong": {
+      "command": "node",
+      "args": [
+        "agents/fake-agent.mjs"
+      ],
+      "env": {
+        "FAKE_SCRIPT": "agents/scripts/cart-blind-wrong.mjs"
+      }
     }
   },
   "profiles": {
@@ -225,6 +234,13 @@
       "dev": "fake-blind",
       "reviewer": "fake-blind",
       "single": "fake-blind"
+    },
+    "fake-blind-wrong": {
+      "planner": "fake-blind-wrong",
+      "qa": "fake-blind-wrong",
+      "dev": "fake-blind-wrong",
+      "reviewer": "fake-blind-wrong",
+      "single": "fake-blind-wrong"
     }
   },
   "defaultProfile": "claude",
@@ -241,7 +257,8 @@
     "fake-crash": "Harness test, no quota. The Planner leaves a background command running and Dev's agent crashes mid-turn, so the run fails and every agent must still be stopped.",
     "claude-sonnet": "Claude Sonnet 5.5 for every role, isolated from your own Claude setup. Used for the evolution benchmark.",
     "fake-dispute": "Harness test, no quota. QA writes one wrong test; Dev disputes it, QA fixes it, and the run goes on without a new plan.",
-    "fake-blind": "Harness test, no quota. Blind QA: Dev only sees a contract test; the real tests stay hidden until Verify."
+    "fake-blind": "Harness test, no quota. Blind QA: Dev only sees a contract test; the real tests stay hidden until Verify.",
+    "fake-blind-wrong": "Harness test, no quota. Blind QA with a wrong hidden test: it fails twice, goes back to QA, and QA fixes it."
   },
   "$isolatedNote": "claude-isolated copies ANTHROPIC_BASE_URL and the model from ~/.claude/settings.json (it no longer reads that file). Update both here if you change them there."
 }
