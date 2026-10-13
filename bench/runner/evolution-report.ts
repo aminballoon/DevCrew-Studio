@@ -98,6 +98,16 @@ function problems(r: Result, events: DevcrewEvent[]): string[] {
       }
     }
   }
+  // Dev's SPEC_ISSUE sends the run back to the Planner, which redoes QA and every module
+  let devText = '';
+  for (const e of events) {
+    if (e.type === 'agent_text' && e.role === 'dev') { devText += e.text; }
+    if (e.type === 'node_finished' && e.node === 'dev') {
+      const issue = devText.match(/^SPEC_ISSUE:\s*(.+)$/m)?.[1];
+      if (issue) { p.push(`Dev reported a spec issue, so the run went back to the Planner and redid every module: ${issue.slice(0, 200)}`); }
+      devText = '';
+    }
+  }
   if (r.regression && r.regression.pass < r.regression.total) { p.push(`Its own tests in tests/ fail: ${r.regression.pass}/${r.regression.total} pass`); }
   return p;
 }
@@ -139,7 +149,8 @@ for (const arm of arms) {
     md += `\n### ${arm} · R${i + 1} (${t}) · ${r.status}${r.resolved ? ' · resolved' : ''}\n\n`;
     const st = stages(events);
     if (st.length > 1) {
-      md += `Steps: ${st.map(s => `${s.node} ${min(s.ms)} / ${k(s.tokens)}`).join(' → ')}\n\n`;
+      const replans = st.filter(x => x.node === 'planner').length - 1;
+      md += `Steps (${st.length}${replans > 0 ? `, ${replans} replan${replans > 1 ? 's' : ''}` : ''}): ${st.map(s => `${s.node} ${min(s.ms)} / ${k(s.tokens)}`).join(' → ')}\n\n`;
     }
     const failing = Object.entries(r.tests ?? {}).filter(([, ok]) => !ok).map(([name]) => name);
     if (failing.length) { md += `Failing hidden tests (${failing.length}):\n${failing.map(n => `- ${n}`).join('\n')}\n\n`; }
