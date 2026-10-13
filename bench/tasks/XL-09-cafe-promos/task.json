@@ -1,0 +1,10 @@
+{
+  "id": "XL-09-cafe-promos",
+  "size": "XL",
+  "title": "Roadmap handoff round: one and the same Haiku single agent builds roadmap item on every arm's code",
+  "timeLimitMinutes": 60,
+  "continues": "XL-08-cafe-tax",
+  "handoffArm": "single-vanilla",
+  "gradeCommand": "node --test \"hidden-tests/**/*.test.ts\"",
+  "regressionCommand": "node --test \"tests/**/*.test.ts\""
+}

@@ -1,0 +1,8 @@
+{
+  "id": "XL-06-cafe-pricing",
+  "size": "XL",
+  "title": "Roadmap build: a pricing engine whose requirement lists the next four releases, to be built later by someone else",
+  "timeLimitMinutes": 120,
+  "gradeCommand": "node --test \"hidden-tests/**/*.test.ts\"",
+  "regressionCommand": "node --test \"tests/**/*.test.ts\""
+}
