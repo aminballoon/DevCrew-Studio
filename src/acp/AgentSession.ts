@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { Readable, Writable } from 'node:stream';
@@ -161,10 +161,16 @@ export class AgentSession {
   close(): void {
     const pid = this.proc.pid;
     if (!pid) { return; }
-    // Agents start long-running tools (test binaries, watchers) that outlive their turn; stop the whole group
-    const killGroup = (signal: NodeJS.Signals) => { try { process.kill(-pid, signal); } catch { /* already gone */ } };
-    killGroup('SIGTERM');
-    setTimeout(() => killGroup('SIGKILL'), 3000).unref();
+    // Agents start long-running tools (test binaries, watchers) that outlive their turn, and some adapters start
+    // the real CLI in a process group of its own (agy). Stop the whole group and every descendant, listed before
+    // anything dies so orphans cannot slip away.
+    const pids = [pid, ...descendants(pid)];
+    const kill = (signal: NodeJS.Signals) => {
+      try { process.kill(-pid, signal); } catch { /* already gone */ }
+      for (const p of pids) { try { process.kill(p, signal); } catch { /* already gone */ } }
+    };
+    kill('SIGTERM');
+    setTimeout(() => kill('SIGKILL'), 3000).unref();
   }
 
   // --- ACP client side ---
@@ -260,4 +266,21 @@ const resolveStudioPath = (v: string) => (v.startsWith('agents/') || v.startsWit
 
 function resolveEnv(env: Record<string, string> | undefined): Record<string, string> {
   return Object.fromEntries(Object.entries(env ?? {}).map(([k, v]) => [k, resolveStudioPath(v)]));
+}
+
+/** Every process below `root`, from `ps`. Empty where `ps` is not available. */
+function descendants(root: number): number[] {
+  let table: string;
+  try { table = execFileSync('ps', ['-A', '-o', 'pid=,ppid='], { encoding: 'utf8' }); } catch { return []; }
+  const children = new Map<number, number[]>();
+  for (const line of table.split('\n')) {
+    const [pid, ppid] = line.trim().split(/\s+/).map(Number);
+    if (pid && ppid) { children.set(ppid, [...(children.get(ppid) ?? []), pid]); }
+  }
+  const found: number[] = [];
+  const queue = [root];
+  while (queue.length) {
+    for (const child of children.get(queue.shift()!) ?? []) { found.push(child); queue.push(child); }
+  }
+  return found;
 }

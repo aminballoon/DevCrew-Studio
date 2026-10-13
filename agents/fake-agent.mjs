@@ -4,6 +4,7 @@
 //   "planner", "qa", "reviewer", "single", or "dev:<module>" (indexed by attempt).
 // Each turn writes files directly (as real agents do with their own tools), reports
 // tool calls, a message and usage, so the dashboard and guards see realistic traffic.
+import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { Readable, Writable } from 'node:stream';
@@ -38,6 +39,9 @@ class FakeAgent {
       await send({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: `No scripted turn for ${key}.` } });
       return { stopReason: 'end_turn' };
     }
+    // Harness tests: a tool left running in the background, or the agent CLI dying mid-turn
+    if (turn.background) { spawn('sh', ['-c', turn.background], { stdio: 'ignore' }); }
+    if (turn.crash) { process.exit(1); }
     await send({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: turn.thinking ?? 'Reading the workspace…\n\n' } });
     await delay(delayMs);
     let i = 0;

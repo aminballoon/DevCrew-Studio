@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execSync } from 'node:child_process';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -240,4 +241,15 @@ test('a run whose process dies is shown as stopped and resumes to the end; a liv
   assert.equal(await done, 'approved');
   const stages = getBus().read(runId).flatMap(e => (e.type === 'node_started' ? [e.node] : []));
   assert.equal(stages.filter(s => s === 'planner').length, 1, 'the planner is not repeated');
+});
+
+test('a run that fails mid-way still stops the agents of earlier steps and what they left running', { timeout: 60_000 }, async () => {
+  const marker = `sleep 34${Math.floor(Math.random() * 900 + 100)}`;
+  process.env.FAKE_MARKER = marker;
+  const alive = () => { try { return execSync(`pgrep -f "${marker}"`).toString().trim().length > 0; } catch { return false; } };
+  const runs = new RunManager();
+  const runId = runs.start({ requirement: readFileSync(join(TASK, 'requirement.md'), 'utf8'), source: join(TASK, 'seed'), profile: 'fake-crash', autoApprove: true });
+  assert.equal(await runs.waitFor(runId), 'failed');
+  for (let i = 0; i < 50 && alive(); i++) { await new Promise(r => setTimeout(r, 100)); }
+  assert.equal(alive(), false, "the Planner's background command was stopped");
 });

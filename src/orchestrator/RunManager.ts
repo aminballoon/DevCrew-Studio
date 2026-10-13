@@ -8,7 +8,7 @@ import { DATA_ROOT, runDir } from '../core/config';
 import { usageByRole, type DevcrewEvent, type GateId } from '../core/events';
 import { loadPipeline, validatePipeline, withGuides, type PipelineDef } from '../pipeline/schema';
 import { buildGraph, type GateAnswer } from './graph';
-import { checkCapabilities, getBus, getConfig } from './runtime';
+import { checkCapabilities, closeSessions, getBus, getConfig } from './runtime';
 
 export interface StartOptions {
   requirement: string;
@@ -166,6 +166,8 @@ export class RunManager {
           this.finished.get(runId)?.(state.values.status);
         }
       } catch (e) {
+        // The graph's finish step did not run, so the agents of earlier steps are still alive
+        closeSessions(runId);
         bus.emit(runId, { type: 'log', level: 'error', message: (e as Error).stack ?? String(e) });
         bus.emit(runId, { type: 'run_finished', status: 'failed', error: (e as Error).message });
         this.finished.get(runId)?.('failed');

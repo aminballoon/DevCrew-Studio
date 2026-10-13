@@ -91,6 +91,15 @@
       "env": {
         "FAKE_SCRIPT": "agents/scripts/cart-trouble.mjs"
       }
+    },
+    "fake-crash": {
+      "command": "node",
+      "args": [
+        "agents/fake-agent.mjs"
+      ],
+      "env": {
+        "FAKE_SCRIPT": "agents/scripts/cart-crash.mjs"
+      }
     }
   },
   "profiles": {
@@ -143,6 +152,13 @@
       "dev": "fake-trouble",
       "reviewer": "fake-trouble",
       "single": "fake-trouble"
+    },
+    "fake-crash": {
+      "planner": "fake-crash",
+      "qa": "fake-crash",
+      "dev": "fake-crash",
+      "reviewer": "fake-crash",
+      "single": "fake-crash"
     }
   },
   "defaultProfile": "claude",
@@ -155,7 +171,8 @@
     "fake-expenses": "Demo, no quota. Medium expense-splitter project (3 parts, 9 files). Ask for changes at Gate 1 to see the Planner send a second version of the architecture. Use project folder bench/tasks/M-01-expenses/seed.",
     "fake-trouble": "Demo, no quota. Things go wrong: Dev never fixes its bug, tries to edit tests and adds a file outside the design, so the run stops for your decision. Use project folder bench/tasks/S-01-cart/seed.",
     "claude-isolated": "Real Claude Code agents without your personal skills, plugins and CLAUDE.md. Use it for benchmarks against other vendors. Uses your subscription quota.",
-    "agy": "Real Antigravity agents (Gemini 3.8 Flash High) for every role, including the security step. Uses your Antigravity quota."
+    "agy": "Real Antigravity agents (Gemini 3.8 Flash High) for every role, including the security step. Uses your Antigravity quota.",
+    "fake-crash": "Harness test, no quota. The Planner leaves a background command running and Dev's agent crashes mid-turn, so the run fails and every agent must still be stopped."
   },
   "$isolatedNote": "claude-isolated copies ANTHROPIC_BASE_URL and the model from ~/.claude/settings.json (it no longer reads that file). Update both here if you change them there."
 }

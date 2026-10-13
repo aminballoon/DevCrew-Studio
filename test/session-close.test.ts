@@ -28,3 +28,21 @@ test('closing a session also stops commands the agent left running', async () =>
   for (let i = 0; i < 40 && alive(marker); i++) { await new Promise(r => setTimeout(r, 100)); }
   assert.equal(alive(marker), false, 'background tool was stopped with the session');
 });
+
+test('closing a session also stops a CLI the adapter started in a process group of its own', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'devcrew-close-'));
+  const marker = `sleep 32${Math.floor(Math.random() * 900 + 100)}`;
+  const [cmd, arg] = marker.split(' ');
+  // Like the agy adapter: a helper of the agent starts the real CLI detached (new process group)
+  const helper = `node -e "require('child_process').spawn('${cmd}', ['${arg}'], { detached: true, stdio: 'ignore' }); setInterval(() => {}, 1000)"`;
+  const session = await AgentSession.start({
+    runId: 'close-test-2', role: 'single', agentName: 'fake', workspace: dir, scope: ROLE_SCOPES.single,
+    bus: new EventBus(id => join(dir, `${id}.jsonl`)), turnTimeoutMs: 60_000,
+    spec: { command: 'sh', args: ['-c', `${helper} & exec node ${join(STUDIO_ROOT, 'agents/fake-agent.mjs')}`], env: { FAKE_SCRIPT: 'agents/scripts/cart.mjs' } },
+  });
+  for (let i = 0; i < 40 && !alive(marker); i++) { await new Promise(r => setTimeout(r, 100)); }
+  assert.ok(alive(marker), 'detached CLI is running');
+  session.close();
+  for (let i = 0; i < 40 && alive(marker); i++) { await new Promise(r => setTimeout(r, 100)); }
+  assert.equal(alive(marker), false, 'detached CLI was stopped with the session');
+});
