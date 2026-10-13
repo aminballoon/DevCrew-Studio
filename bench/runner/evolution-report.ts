@@ -46,14 +46,36 @@ function workspace(events: DevcrewEvent[]): string {
   return s?.type === 'run_started' ? s.workspace : '';
 }
 
-/** Lines of source and the number of tests the arm keeps in tests/. */
+/**
+ * Size and shape of the code an arm leaves behind: lines and files of source, the largest
+ * file, the share of source lines inside blocks of 5+ lines that appear more than once
+ * (copy-paste), and the number of tests it keeps in tests/.
+ */
 function codeStats(ws: string) {
   if (!ws || !existsSync(ws)) { return null; }
-  let srcLines = 0, srcFiles = 0;
+  const files: string[][] = [];
   for (const [path, buf] of takeSnapshot(ws)) {
-    if (path.startsWith('src/') && path.endsWith('.ts')) { srcFiles++; srcLines += buf.toString('utf8').split('\n').length; }
+    if (path.startsWith('src/') && path.endsWith('.ts')) { files.push(buf.toString('utf8').split('\n')); }
   }
-  return { srcLines, srcFiles, ownTests: countDeclaredTests(ws, 'tests/') };
+  const srcLines = files.reduce((n, f) => n + f.length, 0);
+  const largest = Math.max(0, ...files.map(f => f.length));
+  // Meaningful lines only: blank lines, lone braces and imports say nothing about duplication
+  const meaningful = files.map(f => f.map(l => l.trim()).filter(l => l.length > 3 && !/^[{}()[\];,]+$/.test(l) && !l.startsWith('import ')));
+  const WINDOW = 5;
+  const seen = new Map<string, number>();
+  for (const f of meaningful) {
+    for (let i = 0; i + WINDOW <= f.length; i++) { const key = f.slice(i, i + WINDOW).join('\n'); seen.set(key, (seen.get(key) ?? 0) + 1); }
+  }
+  let duplicated = 0, total = 0;
+  for (const f of meaningful) {
+    const dup = new Array(f.length).fill(false);
+    for (let i = 0; i + WINDOW <= f.length; i++) {
+      if ((seen.get(f.slice(i, i + WINDOW).join('\n')) ?? 0) > 1) { for (let j = i; j < i + WINDOW; j++) { dup[j] = true; } }
+    }
+    duplicated += dup.filter(Boolean).length;
+    total += f.length;
+  }
+  return { srcLines, srcFiles: files.length, largest, duplicatedPct: total ? Math.round((duplicated / total) * 100) : 0, ownTests: countDeclaredTests(ws, 'tests/') };
 }
 
 /** Time and tokens per pipeline step, from the event log. */
@@ -129,13 +151,14 @@ for (const arm of arms) {
   md += `| ${arm} | ${cells.join(' | ')} | ${regressionsOf(arm).map(x => x.length).join(' → ') || '—'} |\n`;
 }
 
-md += `\n## Cost and code health per round\n\n| Arm | Round | Tokens | Cost | Time | Own tests (pass/total) | Source lines (files) |\n|---|---|---|---|---|---|---|\n`;
+md += `\n## Cost and code health per round\n\nA handoff round (marked ⇢) is done by one and the same agent on every arm's code, so its cost and result show how easy each arm's code is to extend.\n\n| Arm | Round | Tokens | Cost | Time | Own tests (pass/total) | Source lines (files) | Largest file | Duplicated |\n|---|---|---|---|---|---|---|---|---|\n`;
 for (const arm of arms) {
   tasks.forEach((t, i) => {
     const r = get(t, arm);
     if (!r) { return; }
     const stats = codeStats(workspace(getBus().read(r.runId)));
-    md += `| ${arm} | R${i + 1} | ${k(r.tokens.total)} | $${r.costUsd.toFixed(2)} | ${min(r.wallMs)} | ${r.regression ? `${r.regression.pass}/${r.regression.total}` : '—'} | ${stats ? `${stats.srcLines} (${stats.srcFiles})` : '—'} |\n`;
+    const handoff = (r as Result & { ranAs?: string }).ranAs;
+    md += `| ${arm} | R${i + 1}${handoff ? ` ⇢ ${handoff}` : ''} | ${k(r.tokens.total)} | $${r.costUsd.toFixed(2)} | ${min(r.wallMs)} | ${r.regression ? `${r.regression.pass}/${r.regression.total}` : '—'} | ${stats ? `${stats.srcLines} (${stats.srcFiles})` : '—'} | ${stats ? `${stats.largest} lines` : '—'} | ${stats ? `${stats.duplicatedPct}%` : '—'} |\n`;
   });
 }
 

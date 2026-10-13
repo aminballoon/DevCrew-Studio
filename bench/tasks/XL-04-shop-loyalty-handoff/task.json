@@ -1,0 +1,10 @@
+{
+  "id": "XL-04-shop-loyalty-handoff",
+  "size": "XL",
+  "title": "Handoff round: one and the same single agent adds loyalty points to every arm's round-3 code",
+  "timeLimitMinutes": 180,
+  "continues": "XL-03-shop-store-credit",
+  "handoffArm": "single-vanilla",
+  "gradeCommand": "node --test \"hidden-tests/**/*.test.ts\"",
+  "regressionCommand": "node --test \"tests/**/*.test.ts\""
+}

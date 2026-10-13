@@ -22,6 +22,11 @@ interface Task {
    * earlier task of the suite (not from a seed), so problems carry over as in real development.
    */
   continues?: string;
+  /**
+   * Handoff round: every arm's code from the earlier round is changed by this one arm (for
+   * example single-vanilla), so the result measures how easy each arm's code is to extend.
+   */
+  handoffArm?: string;
 }
 interface Arm {
   id: string; mode: 'single' | 'pipeline'; process?: boolean; profile: string;
@@ -53,7 +58,8 @@ if (values.help) { console.log(USAGE); process.exit(0); }
 
 const taskIds = values.tasks === 'all' ? readdirSync(join(BENCH, 'tasks')) : values.tasks!.split(',');
 const tasks = taskIds.map(id => ({ ...(JSON.parse(readFileSync(join(BENCH, 'tasks', id, 'task.json'), 'utf8')) as Task), id }));
-const arms = values.arms!.split(',').map(id => JSON.parse(readFileSync(join(BENCH, 'arms', `${id}.json`), 'utf8')) as Arm);
+const loadArm = (id: string) => JSON.parse(readFileSync(join(BENCH, 'arms', `${id}.json`), 'utf8')) as Arm;
+const arms = values.arms!.split(',').map(loadArm);
 const reps = Number(values.reps);
 const suite = values.suite ?? `${new Date().toISOString().slice(0, 10)}-${values.profile ?? 'real'}`;
 const outDir = join(BENCH, 'results', suite);
@@ -212,9 +218,11 @@ for (const [i, { task, arm, rep }] of matrix.entries()) {
   const file = join(outDir, `${task.id}__${arm.id}__r${rep}.json`);
   if (savedAndValid(file)) { console.log(`[${i + 1}/${matrix.length}] ${task.id} ${arm.id} #${rep}: already done`); continue; }
   let waitedMin = 0;
+  // In a handoff round the code of `arm` is changed by the handoff arm; results stay under `arm`
+  const runner = task.handoffArm ? loadArm(task.handoffArm) : arm;
   retry: for (;;) {
     // Each task has its own script for the fake agent
-    const profile = values.profile === 'fake' && task.fakeProfile ? task.fakeProfile : values.profile ?? arm.profile;
+    const profile = values.profile === 'fake' && task.fakeProfile ? task.fakeProfile : values.profile ?? runner.profile;
     const requirement = readFileSync(join(BENCH, 'tasks', task.id, 'requirement.md'), 'utf8');
     const seed = task.continues ? seedFromEarlierRound(task, arm, rep) : join(BENCH, 'tasks', task.id, 'seed');
     if (!seed) { console.log(`[${i + 1}/${matrix.length}] ${task.id} ${arm.id} #${rep}: skipped, no workspace from ${task.continues}`); break; }
@@ -235,13 +243,13 @@ for (const [i, { task, arm, rep }] of matrix.entries()) {
     });
 
     let status: string;
-    if (arm.mode === 'pipeline') {
-      runId = runs.start({ requirement, source: seed, profile, autoApprove: true, label, pipeline: arm.pipeline });
+    if (runner.mode === 'pipeline') {
+      runId = runs.start({ requirement, source: seed, profile, autoApprove: true, label, pipeline: runner.pipeline });
       status = await Promise.race([runs.waitFor(runId), deadline]);
     } else {
       runId = `${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${Math.random().toString(16).slice(2, 8)}`;
-      const guides = arm.guides?.map(g => `## ${g}\n\n${readFileSync(guidePath(g), 'utf8').trim()}`).join('\n\n');
-      const single = runSingle({ requirement, source: seed, profile, process: !!arm.process, guides, label, runId, turnTimeoutMs: task.timeLimitMinutes * 60_000 });
+      const guides = runner.guides?.map(g => `## ${g}\n\n${readFileSync(guidePath(g), 'utf8').trim()}`).join('\n\n');
+      const single = runSingle({ requirement, source: seed, profile, process: !!runner.process, guides, label, runId, turnTimeoutMs: task.timeLimitMinutes * 60_000 });
       status = await Promise.race([single.then(r => r.status), deadline]);
     }
     clearTimeout(timer);
@@ -262,6 +270,7 @@ for (const [i, { task, arm, rep }] of matrix.entries()) {
       task: task.id, size: task.size, arm: arm.id, rep, profile, runId, status,
       resolved: g.resolved, hidden: g.hidden, regression: 'regression' in g ? g.regression : undefined, tests: g.tests,
       continues: task.continues,
+      ranAs: task.handoffArm,
       ...m,
       perf: p,
       quotaLimited: quota ?? undefined,
