@@ -48,6 +48,22 @@ Found in the L-01 pilot: QA, Dev and the reviewers never saw the customer's requ
 - New task `L-01-booking` (size L, 90 min): multi-organisation meeting room booking with roles, overlap rules, time-zones, a per-member limit and tenant isolation. 33 hidden tests in three files (functions, rules, security). Checked against a reference implementation kept outside the repo (33/33), and each of six planted bugs (no limit, closed intervals, shared objects, viewer may book, anyone may cancel, no time-zone check) fails at least one test.
 - Rust (1.99) is installed on this machine. Shells started before the install, including the one that runs the bench, need `export PATH=$HOME/.cargo/bin:$PATH`.
 
+## Latest changes (2026-10-13 afternoon, evolution benchmark on Claude Sonnet 5.5)
+Why: a single agent may look fine on one task but get worse as it keeps changing the same code (bugs pile up). One-round tasks cannot show that.
+- **Evolution rounds:** a task with `"continues": "<earlier task>"` starts from what the same arm and rep left in the earlier round (a clean copy without git history, hidden tests or packages), not from a seed. Each round is a fresh agent session with only the repo, like coming back the next day. Hidden tests are cumulative, and results keep pass/fail per test, so a test that passed in round n−1 and fails in round n is a regression.
+- **Three rounds on the shop backend**, each validated against a cumulative reference kept outside the repo, with planted bugs:
+  | Round | Change | Hidden tests | Planted bugs caught |
+  |---|---|---|---|
+  | `XL-01-shop-returns` | returns and refunds | 79 | 35/35 |
+  | `XL-02-shop-split-shipping` | one parcel per warehouse, `partially_shipped`, per-parcel delivery and emails, returns restocked where they shipped from (changes R1's rule) | 93 | 18/18 |
+  | `XL-03-shop-store-credit` | gift cards, store credit, paying with credit, every refund split card-first then credit (changes R1's refunds), secret codes | 106 | 21/21 |
+  Later rounds change earlier behaviour on purpose (requirement drift) and ask the agent to update its own tests, which must keep passing (`regressionCommand`).
+- **Report for improving DevCrew:** `npx tsx bench/runner/evolution-report.ts --suite <name>` writes `REPORT.md`: hidden tests per round, regressions, tokens, cost, time, own tests kept, source size, and per run the steps (time and tokens), failing tests, regressions, timeouts, failed verifies, scope violations and review verdicts.
+- **Claude Sonnet 5.5:** new isolated `claude-sonnet` agent and profile (adapter pinned at 0.89.1). Smoke test on S-01: resolved 13/13, 23 s, $0.08.
+- **Limits for this suite:** 180 min per round; team turns may take up to 60 min (`turnTimeoutMinutes`, was 30). The v3 agy L-04 team run showed why: its Dev turn hit the 30-min limit and the run stopped, although the code it left passed the hidden tests.
+- **Fixed:** a team run that failed mid-way never closed the sessions of earlier steps, and agy runs in a process group of its own, so killing the adapter's group left agy running. Six agy processes were still alive hours after their runs. Now `close()` kills every descendant, and the run manager closes a run's sessions when it fails.
+- The agy v3 suite was stopped at 3/12 to free the machine for this; the rest can be run later.
+
 ## Latest changes (2026-10-13, XL task: a change request on a multi-module codebase)
 Every v1–v3 task was solved by a single agent in 9–15 min, so the suite cannot tell setups apart (ceiling effect). `XL-01-shop-returns` is a harder change request:
 - **Seed:** an order-management backend of 38 files / about 3,000 lines (catalog, customers, warehouses with a stock movement ledger, coupons, pricing with discount allocation, orders with a status table, payments and refunds through a fake gateway, shipping, an audit log fed by domain events, an email outbox, sales and stock reports, a router with error mapping and DTOs) plus 39 passing tests. Written for this benchmark, so no model has seen it.

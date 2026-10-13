@@ -197,7 +197,7 @@
   },
   "defaultProfile": "claude",
   "maxFixAttempts": 5,
-  "turnTimeoutMinutes": 30,
+  "turnTimeoutMinutes": 60,
   "profileNotes": {
     "claude": "Real Claude Code agents. Uses your subscription quota.",
     "cross-vendor": "Real agents: Claude plans and builds, Codex writes tests and reviews. Uses both quotas.",

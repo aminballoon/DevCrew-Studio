@@ -1,0 +1,9 @@
+{
+  "id": "XL-02-shop-split-shipping",
+  "size": "XL",
+  "title": "Evolution round 2: split shipments per warehouse, on top of round 1's returns",
+  "timeLimitMinutes": 180,
+  "continues": "XL-01-shop-returns",
+  "gradeCommand": "node --test \"hidden-tests/**/*.test.ts\"",
+  "regressionCommand": "node --test \"tests/**/*.test.ts\""
+}

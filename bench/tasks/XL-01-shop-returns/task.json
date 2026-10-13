@@ -2,7 +2,7 @@
   "id": "XL-01-shop-returns",
   "size": "XL",
   "title": "Change request: returns and refunds across an existing multi-module shop backend",
-  "timeLimitMinutes": 150,
+  "timeLimitMinutes": 180,
   "gradeCommand": "node --test \"hidden-tests/**/*.test.ts\"",
   "regressionCommand": "node --test \"tests/**/*.test.ts\""
 }
