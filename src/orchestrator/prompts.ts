@@ -92,6 +92,9 @@ Rules:
 - Cover edge cases and error paths, not only the happy path. Name each test after the AC it checks${requirement ? ' and the requirement clause (R-n)' : ''}.
 - Do not use skip, todo or only.
 - The suite will be run with: ${plan.testCommand}
+- Keep the suite lean: it is run on every attempt and maintained by every later change. Aim for about one test per acceptance criterion, and add boundary, hostile-input or concurrency cases only where a clause states a limit, an error or a security property. Prefer one test with several related assertions over many tiny tests, and reuse the helpers already in tests/.
+- When tests/ already has tests, they cover what the project does today. Write tests only for what this change adds or changes, and update the existing tests this change makes wrong. Do not rewrite or duplicate the others.
+- Every test must agree with the requirement and with every other test. Before finishing, run the suite once against the empty implementation and read each failure message to check that it fails for the reason you intend.
 
 ${roleGuide(guide)}
 After you finish, these files are locked: the developer cannot change them.
@@ -99,7 +102,7 @@ End with a list of the test files and which ACs ${requirement ? 'and requirement
 }
 
 export function devPrompt(plan: Plan, module: PlanModule, attempt: number, last: VerifyResult | null, feedback: string | null, earlier: string[] = [], requirement = '', clauses: Clause[] = [], guide?: string): string {
-  const failure = attempt > 1 && last
+  const failure = attempt > 1 && last && !last.passed
     ? `\nYour previous attempt did not pass verification:\n${last.reasons.map(r => `- ${r}`).join('\n')}\n\nTest output (tail):\n\`\`\`\n${last.output.slice(-4000)}\n\`\`\`\nFix the code. The tests are correct by definition here; do not try to change them.\n`
     : '';
   return `${header('dev', module.id, attempt)}
@@ -114,8 +117,8 @@ Rules:
 - tests/, contracts/ and .devcrew/ are read-only for you. Changes there are reverted automatically.
 - Make the tests pass by implementing the behaviour, never by special-casing test inputs.
 - You may run the tests yourself: ${plan.moduleTestCommand?.replace('{module}', module.id) ?? plan.testCommand}
-- If the spec or contracts are contradictory or impossible to implement, stop and reply with a line starting with "SPEC_ISSUE:" explaining why.
-${roleGuide(guide)}${failure}${feedback ? `\nThe approver asked for these changes:\n"""\n${feedback}\n"""\n` : ''}
+- If a test contradicts the requirement or another test, or the spec or contracts are impossible to implement, stop and reply with a line starting with "SPEC_ISSUE:" naming the test (file and line) or the part of the spec, and why. A wrong test goes back to QA to check; a wrong spec goes back to the Planner.
+${roleGuide(guide)}${failure}${feedback ? `\nRead this before you start:\n"""\n${feedback}\n"""\n` : ''}
 End with a short summary of what you changed.`;
 }
 
@@ -193,4 +196,20 @@ You may only write: ${step.mayWrite.join(', ')}. Changes anywhere else are rever
 ${diagram}${step.verdict ? `Write your result to ${step.verdict.file}. Its first line must be exactly "VERDICT: approve" or "VERDICT: changes", followed by your findings ordered by severity, each with file:line.${step.verdict.onChanges === 'dev' ? ` "changes" sends the code back to the developer with your findings, so use it only for problems that must be fixed. ${REQUIREMENT_RULE}` : ''}` : ''}
 ${opts.feedback ? `\nThis is round ${opts.round}. Since your last review the developer changed the code to address:\n"""\n${opts.feedback}\n"""\nCheck whether your findings are fixed.\n` : ''}${opts.gateFeedback ? `\nThe approver reviewed the work so far and sent it back with these notes. Address everything that concerns your role, updating your files in place:\n"""\n${opts.gateFeedback}\n"""\n` : ''}
 End with a short summary.`;
+}
+
+/** QA checks a test the developer says cannot be passed, instead of re-planning the whole run. */
+export function qaDisputePrompt(module: PlanModule, issue: string, last: VerifyResult | null, requirement: string, clauses: Clause[]): string {
+  return `${header('qa', module.id)}
+You are the QA engineer. The developer of module "${module.id}" says your tests cannot be passed:
+"""
+${issue}
+"""
+${last ? `\nLast test run (tail):\n\`\`\`\n${last.output.slice(-3000)}\n\`\`\`\n` : ''}
+${sourceOfTruth(requirement, clauses)}
+Check the disputed tests against the requirement clauses and against each other.
+- If a test is wrong, fix it (only files under tests/) so it checks what the clauses say. Keep the change small; do not rewrite other tests.
+- If the tests are right, change nothing and explain in one or two sentences why, so the developer can make them pass.
+- If the requirement or the plan itself is contradictory, reply with a line starting with "PLAN_ISSUE:" explaining it; the Planner will revise the plan.
+End with one line starting with "QA_ANSWER:" that tells the developer what you decided.`;
 }

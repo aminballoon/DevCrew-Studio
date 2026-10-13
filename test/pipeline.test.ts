@@ -253,3 +253,15 @@ test('a run that fails mid-way still stops the agents of earlier steps and what 
   for (let i = 0; i < 50 && alive(); i++) { await new Promise(r => setTimeout(r, 100)); }
   assert.equal(alive(), false, "the Planner's background command was stopped");
 });
+
+test('a disputed test goes back to QA, not to a new plan', { timeout: 60_000 }, async () => {
+  const runs = new RunManager();
+  const runId = runs.start({ requirement: readFileSync(join(TASK, 'requirement.md'), 'utf8'), source: join(TASK, 'seed'), profile: 'fake-dispute', autoApprove: true });
+  const status = await runs.waitFor(runId);
+  const events = getBus().read(runId);
+  assert.equal(status, 'approved', JSON.stringify(events.filter(e => e.type === 'log')));
+  const stages = events.filter(e => e.type === 'node_started').map(e => e.type === 'node_started' && `${e.node}${e.module ? ':' + e.module : ''}`);
+  assert.deepEqual(stages, ['planner', 'qa', 'dev:cart-core', 'qa:cart-core', 'dev:cart-core', 'verify:cart-core', 'dev:discounts', 'verify:discounts', 'reviewer']);
+  // QA's corrected test is the locked version Verify judged with
+  assert.deepEqual(events.flatMap(e => (e.type === 'verify_result' ? [e.passed] : [])), [true, true]);
+});

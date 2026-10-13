@@ -6,7 +6,7 @@ import { entryNode, loadPipeline, SYSTEM_DIAGRAM, type AgentStep, type GateStep,
 import { captureBaseline, countDeclaredTests, verify, type TestBaseline, type VerifyResult } from '../guard/verify';
 import { commitAll, diffSince, prepareWorkspace, type Workspace } from '../guard/workspace';
 import { readPlan, readText, type Plan } from './plan';
-import { agentStepPrompt, devPrompt, plannerPrompt, qaPrompt } from './prompts';
+import { agentStepPrompt, devPrompt, plannerPrompt, qaDisputePrompt, qaPrompt } from './prompts';
 import { requirementClauses } from './requirement';
 import { collectReports, reportPaths } from './reports';
 import { readSystem } from './system';
@@ -44,6 +44,8 @@ export const PipelineState = Annotation.Root({
   lastVerify: last<VerifyResult | null>(() => null),
   allModulesDone: last<boolean>(() => false),
   specIssue: last<string | null>(() => null),
+  /** How many times Dev has disputed QA's tests, per module; past the limit a dispute goes to the Planner. */
+  disputes: last<Record<string, number>>(() => ({})),
   /** Report text of each step with a verdict, by step id. */
   reviews: last<Record<string, string>>(() => ({})),
   /** How many times each step has sent the work back to Dev. */
@@ -132,8 +134,34 @@ const qa = (def: PipelineDef) => node('qa', async s => {
   }
   const baseline = captureBaseline(s.workspace!.path);
   if (baseline.declared === 0) { throw new Error('QA wrote no tests'); }
-  return { baseline, moduleIndex: 0, attempt: 0, allModulesDone: false, lastVerify: null };
+  return { baseline, moduleIndex: 0, attempt: 0, allModulesDone: false, lastVerify: null, disputes: {} };
 });
+
+/** At most this many test disputes per module go to QA; more mean the plan itself is unclear. */
+export const MAX_DISPUTES = 2;
+
+/**
+ * Dev says a test cannot be passed. QA checks it against the requirement and fixes it if it is
+ * wrong, so one bad test costs one QA turn instead of a new plan, new tests and every module again.
+ */
+const qaDispute = (def: PipelineDef) => node('qa', async s => {
+  const module = s.plan!.modules[s.moduleIndex];
+  const io = { from: ['Dev: a test it says cannot be passed'], reads: [...PLAN_FILES, `tests/${module.id}/`], to: ['Dev (tries again)'] };
+  const turn = await agentTurn(ctx(s, 'qa', io), qaDisputePrompt(module, s.specIssue ?? '', s.lastVerify, s.requirement, requirementClauses(s.requirement)));
+  const disputes = { ...s.disputes, [module.id]: (s.disputes[module.id] ?? 0) + 1 };
+  const planIssue = turn.text.match(/^PLAN_ISSUE:\s*(.+)$/m)?.[1];
+  if (planIssue) {
+    return { disputes, feedback: `QA and the developer found a problem in the plan for module "${module.id}": ${planIssue}` };
+  }
+  const answer = turn.text.match(/^QA_ANSWER:\s*(.+)$/m)?.[1] ?? turn.text.trim().split('\n').slice(-3).join(' ');
+  // QA may have changed tests: they are the new locked version
+  const baseline = captureBaseline(s.workspace!.path);
+  getBus().emit(s.runId, { type: 'log', level: 'info', message: `QA answered a test dispute in ${module.id}: ${answer.slice(0, 300)}` });
+  return {
+    disputes, baseline, specIssue: null,
+    feedback: `You reported: ${s.specIssue}\nQA checked the tests and answered: ${answer}\nThe tests in tests/ are now final for this module. Make them pass.`,
+  };
+}, s => ({ module: s.plan!.modules[s.moduleIndex].id }));
 
 const dev = (def: PipelineDef) => node('dev', async s => {
   const module = s.plan!.modules[s.moduleIndex];
@@ -361,8 +389,18 @@ export function buildGraph(def: PipelineDef = loadPipeline('standard')) {
         break;
       case 'build': {
         const after = nextNode('build');
+        const hasQa = steps.some(x => x.type === 'qa');
         g.addNode('dev', dev(def)).addNode('verify', verifyNode).addNode('escalate', escalate)
-          .addConditionalEdges('dev', (s: S) => (s.specIssue ? 'planner' : 'verify'), ['verify', 'planner'])
+          .addConditionalEdges('dev', (s: S) => {
+            if (!s.specIssue) { return 'verify'; }
+            const module = s.plan!.modules[s.moduleIndex].id;
+            return hasQa && (s.disputes[module] ?? 0) < MAX_DISPUTES ? 'dispute' : 'planner';
+          }, ['verify', 'planner', ...(hasQa ? ['dispute'] : [])]);
+        if (hasQa) {
+          g.addNode('dispute', qaDispute(def))
+            .addConditionalEdges('dispute', (s: S) => (s.specIssue ? 'planner' : 'dev'), ['dev', 'planner']);
+        }
+        g
           .addConditionalEdges('verify', (s: S) => {
             if (s.allModulesDone) { return after; }
             if (s.lastVerify?.passed) { return 'dev'; }
