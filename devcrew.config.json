@@ -65,6 +65,32 @@
         }
       }
     },
+    "claude-haiku": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@agentclientprotocol/claude-agent-acp@0.89.1"
+      ],
+      "provides": [
+        "web",
+        "shell"
+      ],
+      "note": "Claude Haiku 5.5, isolated like claude-isolated. Adapter version pinned for benchmarks.",
+      "env": {
+        "ANTHROPIC_BASE_URL": "http://127.0.0.1:8787"
+      },
+      "sessionMeta": {
+        "claudeCode": {
+          "options": {
+            "settingSources": [
+              "project",
+              "local"
+            ],
+            "model": "claude-haiku-5-5"
+          }
+        }
+      }
+    },
     "codex": {
       "command": "npx",
       "args": [
@@ -178,6 +204,14 @@
       "security": "claude-sonnet",
       "single": "claude-sonnet"
     },
+    "claude-haiku": {
+      "planner": "claude-haiku",
+      "qa": "claude-haiku",
+      "dev": "claude-haiku",
+      "reviewer": "claude-haiku",
+      "security": "claude-haiku",
+      "single": "claude-haiku"
+    },
     "cross-vendor": {
       "planner": "claude",
       "qa": "codex",
@@ -258,7 +292,8 @@
     "claude-sonnet": "Claude Sonnet 5.5 for every role, isolated from your own Claude setup. Used for the evolution benchmark.",
     "fake-dispute": "Harness test, no quota. QA writes one wrong test; Dev disputes it, QA fixes it, and the run goes on without a new plan.",
     "fake-blind": "Harness test, no quota. Blind QA: Dev only sees a contract test; the real tests stay hidden until Verify.",
-    "fake-blind-wrong": "Harness test, no quota. Blind QA with a wrong hidden test: it fails twice, goes back to QA, and QA fixes it."
+    "fake-blind-wrong": "Harness test, no quota. Blind QA with a wrong hidden test: it fails twice, goes back to QA, and QA fixes it.",
+    "claude-haiku": "Claude Haiku 5.5 for every role, isolated from your own Claude setup: the smaller, cheaper model."
   },
   "$isolatedNote": "claude-isolated copies ANTHROPIC_BASE_URL and the model from ~/.claude/settings.json (it no longer reads that file). Update both here if you change them there."
 }
