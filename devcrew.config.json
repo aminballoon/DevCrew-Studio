@@ -39,6 +39,32 @@
         }
       }
     },
+    "claude-sonnet": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@agentclientprotocol/claude-agent-acp@0.89.1"
+      ],
+      "provides": [
+        "web",
+        "shell"
+      ],
+      "note": "Claude Sonnet 5.5, isolated like claude-isolated (no user-level skills, plugins, hooks or CLAUDE.md). Adapter version pinned for benchmarks.",
+      "env": {
+        "ANTHROPIC_BASE_URL": "http://127.0.0.1:8787"
+      },
+      "sessionMeta": {
+        "claudeCode": {
+          "options": {
+            "settingSources": [
+              "project",
+              "local"
+            ],
+            "model": "claude-sonnet-5-5"
+          }
+        }
+      }
+    },
     "codex": {
       "command": "npx",
       "args": [
@@ -117,6 +143,14 @@
       "reviewer": "claude-isolated",
       "single": "claude-isolated"
     },
+    "claude-sonnet": {
+      "planner": "claude-sonnet",
+      "qa": "claude-sonnet",
+      "dev": "claude-sonnet",
+      "reviewer": "claude-sonnet",
+      "security": "claude-sonnet",
+      "single": "claude-sonnet"
+    },
     "cross-vendor": {
       "planner": "claude",
       "qa": "codex",
@@ -172,7 +206,8 @@
     "fake-trouble": "Demo, no quota. Things go wrong: Dev never fixes its bug, tries to edit tests and adds a file outside the design, so the run stops for your decision. Use project folder bench/tasks/S-01-cart/seed.",
     "claude-isolated": "Real Claude Code agents without your personal skills, plugins and CLAUDE.md. Use it for benchmarks against other vendors. Uses your subscription quota.",
     "agy": "Real Antigravity agents (Gemini 3.8 Flash High) for every role, including the security step. Uses your Antigravity quota.",
-    "fake-crash": "Harness test, no quota. The Planner leaves a background command running and Dev's agent crashes mid-turn, so the run fails and every agent must still be stopped."
+    "fake-crash": "Harness test, no quota. The Planner leaves a background command running and Dev's agent crashes mid-turn, so the run fails and every agent must still be stopped.",
+    "claude-sonnet": "Claude Sonnet 5.5 for every role, isolated from your own Claude setup. Used for the evolution benchmark."
   },
   "$isolatedNote": "claude-isolated copies ANTHROPIC_BASE_URL and the model from ~/.claude/settings.json (it no longer reads that file). Update both here if you change them there."
 }

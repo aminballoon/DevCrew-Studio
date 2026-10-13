@@ -17,6 +17,11 @@ interface Task {
   perfCommand?: string;
   /** Scripted agent profile that fits this task, used when running with --profile fake. */
   fakeProfile?: string;
+  /**
+   * Evolution rounds: this task starts from what the same arm and rep left behind in this
+   * earlier task of the suite (not from a seed), so problems carry over as in real development.
+   */
+  continues?: string;
 }
 interface Arm {
   id: string; mode: 'single' | 'pipeline'; process?: boolean; profile: string;
@@ -54,12 +59,50 @@ const suite = values.suite ?? `${new Date().toISOString().slice(0, 10)}-${values
 const outDir = join(BENCH, 'results', suite);
 mkdirSync(outDir, { recursive: true });
 
-// Randomized order, so slow periods or a draining quota do not land on one arm
+// Randomized order, so slow periods or a draining quota do not land on one arm. Evolution
+// rounds keep the task order given, since each round starts from the one before.
+const evolution = tasks.some(t => t.continues);
 const matrix = tasks.flatMap(task => arms.flatMap(arm => Array.from({ length: reps }, (_, i) => ({ task, arm, rep: i + 1 }))))
-  .map(x => ({ x, k: Math.random() })).sort((a, b) => a.k - b.k).map(({ x }) => x);
+  .map(x => ({ x, k: (evolution ? taskIds.indexOf(x.task.id) : 0) + Math.random() })).sort((a, b) => a.k - b.k).map(({ x }) => x);
+for (const t of tasks) {
+  if (t.continues && !taskIds.includes(t.continues) && !existsSync(join(outDir, `${t.continues}__${arms[0].id}__r1.json`))) {
+    console.error(`${t.id} continues ${t.continues}: run them in the same suite, in that order`);
+    process.exit(1);
+  }
+}
 
 const runs = new RunManager();
 const sha = (s: string) => createHash('sha256').update(s).digest('hex').slice(0, 12);
+
+const workspaceOf = (runId: string) => {
+  const started = getBus().read(runId).find(e => e.type === 'run_started');
+  return started?.type === 'run_started' ? started.workspace : '';
+};
+
+/**
+ * The starting point of an evolution round: a plain copy of what the earlier round left in
+ * its workspace, without its git history, the graded hidden files or installed packages.
+ */
+function seedFromEarlierRound(task: Task, arm: Arm, rep: number): string | null {
+  const earlier = join(outDir, `${task.continues}__${arm.id}__r${rep}.json`);
+  if (!existsSync(earlier)) { return null; }
+  const workspace = workspaceOf(JSON.parse(readFileSync(earlier, 'utf8')).runId);
+  if (!workspace || !existsSync(workspace)) { return null; }
+  const seed = join(outDir, '.seeds', `${task.id}__${arm.id}__r${rep}`);
+  rmSync(seed, { recursive: true, force: true });
+  cpSync(workspace, seed, { recursive: true, filter: src => !/[/\\](node_modules|\.git|hidden-tests|hidden-perf)([/\\]|$)/.test(src.slice(workspace.length)) });
+  return seed;
+}
+
+/** Pass or fail per test name, from node --test's spec output. */
+function testResults(output: string): Record<string, boolean> {
+  const results: Record<string, boolean> = {};
+  for (const line of output.replace(/\x1b\[[0-9;]*m/g, '').split('\n')) {
+    const m = line.match(/^\s*(✔|✖) (.+) \([\d.]+m?s\)$/);
+    if (m && m[2] !== 'failing tests:') { results[m[2]] = m[1] === '✔' && results[m[2]] !== false; }
+  }
+  return results;
+}
 
 /** Copy the hidden tests in only now, run them, and judge. */
 async function grade(task: Task, workspace: string) {
@@ -76,7 +119,7 @@ async function grade(task: Task, workspace: string) {
     regression = { pass: r.pass, total: r.total };
   }
   const resolved = hidden.fail === 0 && hidden.total >= declared && hidden.pass === hidden.total && (!regression || regression.pass === regression.total);
-  return { hidden: { ...hidden, declared }, regression, resolved, output: run.output.slice(-4000) };
+  return { hidden: { ...hidden, declared }, regression, resolved, tests: testResults(run.output), output: run.output.slice(-4000) };
 }
 
 /** Run the task's performance probe 3 times and keep the median of each number. */
@@ -150,13 +193,12 @@ if (values.regrade) {
     const file = join(outDir, `${task.id}__${arm.id}__r${rep}.json`);
     if (!existsSync(file)) { continue; }
     const r = JSON.parse(readFileSync(file, 'utf8'));
-    const started = getBus().read(r.runId).find(e => e.type === 'run_started');
-    const workspace = started?.type === 'run_started' ? started.workspace : '';
+    const workspace = workspaceOf(r.runId);
     if (!workspace || !existsSync(workspace)) { console.log(`${task.id} ${arm.id} #${rep}: workspace gone, kept as is`); continue; }
     const before = `${r.resolved ? 'RESOLVED' : 'unresolved'} ${r.hidden.pass}/${r.hidden.total} (declared ${r.hidden.declared})`;
     const g = await grade(task, workspace);
     const p = g.hidden.pass > 0 ? await perf(task, workspace) : undefined;
-    Object.assign(r, { resolved: g.resolved, hidden: g.hidden, regression: 'regression' in g ? g.regression : undefined, perf: p, gradeOutput: g.output, regradedAt: new Date().toISOString() });
+    Object.assign(r, { resolved: g.resolved, hidden: g.hidden, regression: 'regression' in g ? g.regression : undefined, tests: g.tests, perf: p, gradeOutput: g.output, regradedAt: new Date().toISOString() });
     writeFileSync(file, JSON.stringify(r, null, 2));
     console.log(`${task.id} ${arm.id} #${rep}: ${before} → ${g.resolved ? 'RESOLVED' : 'unresolved'} ${g.hidden.pass}/${g.hidden.total} (declared ${g.hidden.declared})${p ? ` · perf ${JSON.stringify(p)}` : ''}`);
   }
@@ -174,7 +216,8 @@ for (const [i, { task, arm, rep }] of matrix.entries()) {
     // Each task has its own script for the fake agent
     const profile = values.profile === 'fake' && task.fakeProfile ? task.fakeProfile : values.profile ?? arm.profile;
     const requirement = readFileSync(join(BENCH, 'tasks', task.id, 'requirement.md'), 'utf8');
-    const seed = join(BENCH, 'tasks', task.id, 'seed');
+    const seed = task.continues ? seedFromEarlierRound(task, arm, rep) : join(BENCH, 'tasks', task.id, 'seed');
+    if (!seed) { console.log(`[${i + 1}/${matrix.length}] ${task.id} ${arm.id} #${rep}: skipped, no workspace from ${task.continues}`); break; }
     const label = `bench ${task.id} · ${arm.id} #${rep}`;
     process.stdout.write(`[${i + 1}/${matrix.length}] ${task.id} ${arm.id} #${rep} … `);
 
@@ -210,15 +253,15 @@ for (const [i, { task, arm, rep }] of matrix.entries()) {
       waitedMin += QUOTA_WAIT_MIN;
       continue retry;
     }
-    const started = getBus().read(runId).find(e => e.type === 'run_started');
-    const workspace = started?.type === 'run_started' ? started.workspace : '';
+    const workspace = workspaceOf(runId);
 
-    const g = workspace ? await grade(task, workspace) : { hidden: { total: 0, pass: 0, fail: 0, skipped: 0, declared: 0 }, resolved: false, output: '' };
+    const g = workspace ? await grade(task, workspace) : { hidden: { total: 0, pass: 0, fail: 0, skipped: 0, declared: 0 }, resolved: false, tests: {}, output: '' };
     const p = workspace && g.hidden.pass > 0 ? await perf(task, workspace) : undefined;
     const m = metrics(getBus().read(runId));
     const result = {
       task: task.id, size: task.size, arm: arm.id, rep, profile, runId, status,
-      resolved: g.resolved, hidden: g.hidden, regression: 'regression' in g ? g.regression : undefined,
+      resolved: g.resolved, hidden: g.hidden, regression: 'regression' in g ? g.regression : undefined, tests: g.tests,
+      continues: task.continues,
       ...m,
       perf: p,
       quotaLimited: quota ?? undefined,
