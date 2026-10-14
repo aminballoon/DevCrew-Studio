@@ -246,7 +246,7 @@ function pipelineLayout(def) {
     if (s.type === 'planner') nodes.push({ id: 'planner', label: 'Planner', role: 'PO + ARCHITECT', agentRole: 'planner' });
     else if (s.type === 'qa') nodes.push({ id: 'qa', label: 'QA', role: fast ? 'HIDDEN TESTS' : 'TESTS FIRST', agentRole: 'qa' });
     else if (s.type === 'build') nodes.push({ id: 'dev', label: fast ? 'Builder' : 'Developer', role: fast ? 'SAME TIME AS QA' : 'PER MODULE', agentRole: 'dev' }, { id: 'verify', label: 'Verify', role: 'NO AI · JUDGE' });
-    else if (s.type === 'gate') nodes.push({ id: s.id, label: `Gate ${++gateNo}`, gate: true, sub: { plan: 'Plan', code: 'Code', design: 'Design' }[s.review] });
+    else if (s.type === 'gate') nodes.push({ id: s.id, label: `Gate ${++gateNo}`, gate: true, sub: { plan: 'Plan', code: 'Code', design: 'Design', architecture: 'Architecture' }[s.review] });
     else nodes.push({
       id: s.id, label: s.name.length > 15 ? `${s.name.slice(0, 14)}…` : s.name, agentRole: s.id,
       role: s.instructions === 'builtin:reviewer' ? 'CODE REVIEW' : s.verdict?.onChanges === 'dev' ? 'CAN SEND BACK' : 'ADVISORY',
@@ -1159,6 +1159,19 @@ function renderGate(m) {
         <dl class="kv" style="margin-top:12px"><dt>Test command</dt><dd><code>${esc(plan?.testCommand)}</code></dd></dl></div>
       ${reportPanes(payload.reports)}`;
     actions = gateButtons([['approve', 'Approve plan and architecture', 'ok'], ['revise', 'Ask for changes', ''], ['abort', 'Cancel run', 'danger']]);
+  } else if (kind === 'architecture') {
+    title = `Gate · ${payload.title ?? 'Approve the architecture'}`;
+    const a = payload.architecture;
+    const contracts = payload.contracts ?? [];
+    body = `${payload.architectureError ? `<div class="banner warn">${esc(payload.architectureError)}</div>` : ''}
+      <p class="gate-ask">The Architect has designed the architecture this project will keep. Nothing has been built yet. If you approve, every run builds inside it, and Verify rejects any import that breaks its rules.</p>
+      <div class="subtabs" id="arch-gate-tabs"><button type="button" class="on" data-pane="modules">Modules (${a?.modules?.length ?? 0})</button><button type="button" data-pane="doc">Design and reasons</button><button type="button" data-pane="contracts">Contracts (${contracts.length})</button></div>
+      <div data-pane="modules"><table class="files"><tr><th>Module</th><th>Owns</th><th>What it does</th><th>May use</th><th>Others enter through</th></tr>
+        ${(a?.modules ?? []).map(m => `<tr><td><b>${esc(m.id)}</b></td><td class="path">${esc(m.path)}</td><td>${esc(m.purpose)}</td><td>${esc(m.mayUse.join(', ') || 'nothing else')}</td><td class="path">${esc(m.interface ?? 'any file')}</td></tr>`).join('')}</table>
+        ${(a?.decisions ?? []).length ? `<h4>Decisions</h4><ul>${a.decisions.map(d => `<li><b>${esc(d.id)} ${esc(d.title)}:</b> ${esc(d.decision)} <span class="hint">${esc(d.why)}</span></li>`).join('')}</ul>` : ''}</div>
+      <div data-pane="doc" hidden><div class="doc">${payload.doc ? md(payload.doc) : '<p class="hint">No ARCHITECTURE.md written</p>'}</div></div>
+      <div data-pane="contracts" hidden>${contracts.map(c => `<h4 class="path">${esc(c.path)}</h4><pre class="doc">${esc(c.text)}</pre>`).join('') || '<p class="hint">No contracts written</p>'}</div>`;
+    actions = gateButtons([['approve', 'Approve the architecture', 'ok'], ['revise', 'Ask for changes', ''], ['abort', 'Cancel run', 'danger']]);
   } else if (kind === 'design') {
     title = `Gate · ${payload.title ?? 'Review the design'}`;
     const isLast = DEF?.steps.at(-1)?.id === gate;
@@ -1454,7 +1467,7 @@ function describeSteps(def) {
       case 'planner': who = 'Planner'; what = 'Reads your request, writes the spec and designs every file.'; break;
       case 'qa': who = 'QA'; what = 'Writes tests from the spec before any code exists. The tests are locked afterwards.'; break;
       case 'build': who = 'Dev + Verify'; what = `Dev builds one part at a time; the system runs the tests after each try. Up to ${s.maxAttempts ?? S.config?.maxFixAttempts ?? 5} tries per part, then you decide.`; break;
-      case 'gate': who = 'You'; what = `Review the ${{ plan: 'spec, architecture and the reports so far', code: 'code, test results and reviews', design: 'system diagram and the reports so far' }[s.review]} (“${esc(s.title)}”). Approve to continue${i === def.steps.length - 1 ? ' and commit' : ''}, or ask for changes to send it back to ${esc(nameOf(def.steps.find(x => x.id === s.reviseTo)))}.`; break;
+      case 'gate': who = 'You'; what = `Review the ${{ plan: 'spec, architecture and the reports so far', code: 'code, test results and reviews', design: 'system diagram and the reports so far', architecture: "project's lasting architecture" }[s.review]} (“${esc(s.title)}”). Approve to continue${i === def.steps.length - 1 ? ' and commit' : ''}, or ask for changes to send it back to ${esc(nameOf(def.steps.find(x => x.id === s.reviseTo)))}.`; break;
       default: who = esc(s.name) + (s.agent ? ` <span class="hint">(${esc(s.agent)})</span>` : ''); what = `${esc(s.purpose)} May only write <code>${s.mayWrite.map(esc).join(', ')}</code>.${s.verdict?.onChanges === 'dev' ? ` Can send the code back to Dev, at most ${plural(s.verdict.maxRounds ?? 1, 'time')}.` : ''}${/^guide:/.test(s.instructions) ? ` Follows the role guide <code>pipelines/roles/${esc(s.instructions.slice(6))}.md</code>.` : ''}${s.needs?.length ? ` Needs an agent that can use ${esc(s.needs.join(' and '))}.` : ''}`;
     }
     if (s.type !== 'agent' && /^guide:/.test(s.guide ?? '')) what += ` Also follows the role guide <code>pipelines/roles/${esc(s.guide.slice(6))}.md</code>.`;

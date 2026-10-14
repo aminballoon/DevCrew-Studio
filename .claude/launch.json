@@ -4,8 +4,24 @@
     {
       "name": "dashboard",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dashboard"],
+      "runtimeArgs": [
+        "run",
+        "dashboard"
+      ],
       "port": 4317
+    },
+    {
+      "name": "dashboard-quiet",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "DEVCREW_NO_NOTIFY=1",
+        "PORT=4318",
+        "DEVCREW_DATA=/private/tmp/claude-501/-Users-aminballoon-DevCrew-Studio/889cd6b9-ff2c-4737-8a30-3374e3e50b31/scratchpad/devcrew-data",
+        "npm",
+        "run",
+        "dashboard"
+      ],
+      "port": 4318
     }
   ]
 }

@@ -16,6 +16,7 @@ const GATE_SHOWS = {
   plan: 'spec, architecture and the reports written so far',
   code: 'code, test results and reviews',
   design: 'system diagram and the reports written so far',
+  architecture: "project's lasting architecture: modules, which may use which, contracts and decisions",
 };
 
 /** One line per step, in words a non-programmer can review. */

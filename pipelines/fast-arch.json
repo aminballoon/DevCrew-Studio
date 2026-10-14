@@ -1,0 +1,33 @@
+{
+  "id": "fast-arch",
+  "name": "Fast team with an architecture",
+  "description": "The fast team inside a lasting architecture. When the project has none yet, an Architect designs its modules, the rules for which may use which, and the contracts, and you approve them once. Every run after that builds inside it, and Verify rejects imports that break the rules.",
+  "kind": "fast",
+  "steps": [
+    {
+      "type": "agent",
+      "id": "architect",
+      "name": "Architect",
+      "purpose": "Designs the modules, which may use which, and the contracts the project keeps; runs only while the project has no architecture.",
+      "instructions": "builtin:architect",
+      "reads": ["the requirement", "the existing files"],
+      "mayWrite": [".devcrew/architecture.json", ".devcrew/ARCHITECTURE.md", "contracts/"],
+      "produces": [".devcrew/architecture.json: modules and dependency rules", ".devcrew/ARCHITECTURE.md: the design and its reasons", "contracts/: module interfaces"]
+    },
+    { "type": "gate", "id": "gate_arch", "title": "Approve the architecture", "review": "architecture", "reviseTo": "architect" },
+    { "type": "qa", "id": "qa", "blind": true },
+    { "type": "build", "id": "build" },
+    {
+      "type": "agent",
+      "id": "reviewer",
+      "name": "Reviewer",
+      "purpose": "Reads only the changes, with a fresh mind, and sends real problems back to the Builder once.",
+      "instructions": "builtin:reviewer",
+      "reads": ["git diff"],
+      "mayWrite": [".devcrew/review.md"],
+      "produces": [".devcrew/review.md: verdict and findings"],
+      "verdict": { "file": ".devcrew/review.md", "onChanges": "dev", "maxRounds": 1 }
+    },
+    { "type": "gate", "id": "gate_merge", "title": "Approve the merge", "review": "code", "reviseTo": "build" }
+  ]
+}

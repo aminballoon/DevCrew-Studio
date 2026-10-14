@@ -6,6 +6,7 @@ import { Annotation, END, interrupt, START, StateGraph } from '@langchain/langgr
 import { runDir } from '../core/config';
 import { usageByRole, type GateId } from '../core/events';
 import { entryNode, loadPipeline, SYSTEM_DIAGRAM, type AgentStep, type GateStep, type PipelineDef, type Step } from '../pipeline/schema';
+import { ARCHITECTURE_DOC, ARCHITECTURE_FILE, checkArchitecture, readArchitecture } from '../guard/architecture';
 import { NOT_AUTHORED, takeSnapshot } from '../guard/snapshot';
 import { captureBaseline, countDeclaredTests, verify, type TestBaseline, type VerifyResult } from '../guard/verify';
 import { commitAll, diffSince, prepareWorkspace, type Workspace } from '../guard/workspace';
@@ -56,6 +57,8 @@ export const PipelineState = Annotation.Root({
   replans: last<number>(() => 0),
   /** Fast pipeline: how to run QA's hidden acceptance tests. */
   acceptanceRun: last<TestRun | null>(() => null),
+  /** Fast pipeline: the Builder says the requirement does not fit the architecture; a person decides. */
+  archChange: last<string | null>(() => null),
   /** Report text of each step with a verdict, by step id. */
   reviews: last<Record<string, string>>(() => ({})),
   /** How many times each step has sent the work back to Dev. */
@@ -328,10 +331,12 @@ const verifyNode = (def: PipelineDef) => node('verify', async s => {
   }
   // Without per-module tests, earlier modules cannot pass alone: only judge at the end
   const deferred = runs.length === 1 && !isLast && !(plan.moduleTestCommand && moduleTests > 0) && !acceptanceModuleRun;
+  // A project with an architecture file is held to it once all of its modules exist
+  const architecture = isLast ? architectureReasons(ws) : [];
   const result: VerifyResult = {
-    passed: deferred || runs.every(r => r.passed),
+    passed: (deferred || runs.every(r => r.passed)) && !architecture.length,
     tests: runs[runs.length - 1].tests,
-    reasons: deferred ? [] : runs.flatMap(r => r.reasons),
+    reasons: [...(deferred ? [] : runs.flatMap(r => r.reasons)), ...architecture],
     output: runs.map(r => r.output).join('\n\n'),
   };
   getBus().emit(s.runId, { type: 'verify_result', module: module.id, attempt: s.attempt, passed: result.passed, tests: result.tests, reasons: result.reasons, output: result.output.slice(-6000), commands });
@@ -383,8 +388,35 @@ export function failingTests(output: string): string[] {
 // --- Fast pipeline: the Builder and a blind QA start together; Verify judges with both test sets ---
 
 const isFast = (def: PipelineDef) => def.kind === 'fast';
-/** The Builder writes everything except QA's hidden tests. */
-const BUILDER_SCOPE = { write: ['*'], deny: [`${ACCEPTANCE}/`, ACCEPTANCE_RUN] };
+
+/** Why the architecture file cannot be enforced, or null when it is missing problems (or missing). */
+function architectureProblem(ws: string): string | null {
+  try { return readArchitecture(ws) ? null : `${ARCHITECTURE_FILE} was not written`; } catch (e) { return (e as Error).message; }
+}
+
+/** Verify's reasons for imports that break the project's architecture (none when it has no architecture). */
+function architectureReasons(ws: string): string[] {
+  try {
+    const result = checkArchitecture(ws);
+    if (!result) { return []; }
+    const shown = result.problems.slice(0, 20).map(p => `Architecture: ${p}`);
+    return result.problems.length > 20 ? [...shown, `Architecture: ${result.problems.length - 20} more imports break the rules`] : shown;
+  } catch (e) {
+    return [`Architecture: ${(e as Error).message}`];
+  }
+}
+
+/** The architecture files, pasted for the Builder; none when the project has no architecture. */
+const architectureFiles = (ws: string) => (existsSync(join(ws, ARCHITECTURE_FILE)) ? pasteFiles(ws, [ARCHITECTURE_FILE, ARCHITECTURE_DOC, 'contracts/']) : []);
+
+/** The Builder writes everything except QA's hidden tests and, once there is one, the architecture it builds in. */
+const builderScope = (ws: string) => ({
+  write: ['*'],
+  deny: [`${ACCEPTANCE}/`, ACCEPTANCE_RUN, ...(existsSync(join(ws, ARCHITECTURE_FILE)) ? [ARCHITECTURE_FILE, ARCHITECTURE_DOC, 'contracts/'] : [])],
+});
+
+/** A Builder's answer that says the requirement needs another architecture. */
+const archChangeIn = (text: string) => text.match(/^ARCH_CHANGE:\s*(.+)$/m)?.[1] ?? null;
 const FAST_QA_SCOPE = { write: [`${ACCEPTANCE}/`, ACCEPTANCE_RUN], deny: [] };
 const MAIN: Plan['modules'][number] = { id: 'main', title: 'Build', description: 'Everything the requirement asks for.' };
 
@@ -410,12 +442,14 @@ const fastWork = (def: PipelineDef) => node('qa', async s => {
   rmSync(copy, { recursive: true, force: true });
   cpSync(ws, copy, { recursive: true, filter: src => !NOT_AUTHORED.some(d => src.slice(ws.length).split(/[/\\]/).includes(d)) });
 
-  const builder: TurnContext = { ...ctx(s, 'dev', { from: ['You: the requirement'], reads: [], to: ['Verify'] }), scope: BUILDER_SCOPE };
+  const architecture = architectureFiles(ws);
+  const builder: TurnContext = { ...ctx(s, 'dev', { from: ['You: the requirement', ...(architecture.length ? ['Architect: the architecture'] : [])], reads: [], to: ['Verify'] }), scope: builderScope(ws) };
   const qa: TurnContext = { ...ctx(s, 'qa', { from: ['You: the requirement'], reads: [], to: ['Verify (judge with them)'] }), workspace: copy, scope: FAST_QA_SCOPE };
   getBus().emit(s.runId, { type: 'node_started', node: 'dev', module: MAIN.id, attempt: 1 });
   const [built] = await Promise.all([
-    agentTurn(builder, builderPrompt(s.requirement, clauses, guideOf(def, 'build'))).then(async turn => ({ turn, run: await testRunOf(builder, BUILDER_TESTS) })),
-    agentTurn(qa, fastQaPrompt(s.requirement, clauses, guideOf(def, 'qa'))).then(async () => {
+    agentTurn(builder, builderPrompt(s.requirement, clauses, guideOf(def, 'build'), architecture)).then(async turn => ({ turn, run: await testRunOf(builder, BUILDER_TESTS) })),
+    // QA writes against the same contracts the Builder implements
+    agentTurn(qa, fastQaPrompt(s.requirement, clauses, guideOf(def, 'qa'), pasteFiles(ws, ['contracts/']))).then(async () => {
       if (countDeclaredTests(copy, `${ACCEPTANCE}/`) === 0) {
         await agentTurn({ ...qa, continues: true }, `No test cases were found under ${ACCEPTANCE}/. Write the acceptance tests now.`);
       }
@@ -431,7 +465,7 @@ const fastWork = (def: PipelineDef) => node('qa', async s => {
   return {
     plan: fastPlan(built.run), acceptanceRun, baseline: captureBaseline(ws),
     moduleIndex: 0, attempt: 1, allModulesDone: false, lastVerify: null, disputes: {},
-    lastDevReport: built.turn.text.trim().slice(-1500),
+    lastDevReport: built.turn.text.trim().slice(-1500), archChange: archChangeIn(built.turn.text),
   };
 });
 
@@ -440,12 +474,12 @@ const fastDev = node('dev', async s => {
   const attempt = s.attempt + 1;
   const turn: TurnContext = {
     ...ctx(s, 'dev', { from: [...(s.lastVerify && !s.lastVerify.passed ? ['Verify: what failed'] : []), ...(s.feedback ? ['Feedback'] : [])], reads: [], to: ['Verify'] }),
-    scope: BUILDER_SCOPE,
+    scope: builderScope(s.workspace!.path),
   };
   const result = await agentTurn(turn, builderFixPrompt(attempt, s.lastVerify, s.feedback));
   const issue = result.text.match(/^SPEC_ISSUE:\s*(.+)$/m)?.[1] ?? null;
   return {
-    attempt, plan: fastPlan(await testRunOf(turn, BUILDER_TESTS)), specIssue: issue,
+    attempt, plan: fastPlan(await testRunOf(turn, BUILDER_TESTS)), specIssue: issue, archChange: archChangeIn(result.text),
     feedback: issue ? `The Builder reported a problem with a hidden test: ${issue}` : null,
     lastDevReport: result.text.trim().slice(-1500),
   };
@@ -464,10 +498,11 @@ const fastVerify = node('verify', async s => {
   } finally {
     hideAcceptance(s);
   }
+  const architecture = architectureReasons(ws);
   const result: VerifyResult = {
-    passed: own.passed && hidden.passed,
+    passed: own.passed && hidden.passed && !architecture.length,
     tests: hidden.tests,
-    reasons: [...own.reasons.map(r => `Your tests: ${r}`), ...hidden.reasons.map(r => `Hidden tests: ${r}`)],
+    reasons: [...own.reasons.map(r => `Your tests: ${r}`), ...hidden.reasons.map(r => `Hidden tests: ${r}`), ...architecture],
     output: `--- your tests ---\n${own.output.slice(-3000)}\n\n--- hidden acceptance tests ---\n${hidden.output}`,
   };
   getBus().emit(s.runId, { type: 'verify_result', module: MAIN.id, attempt: s.attempt, passed: result.passed, tests: result.tests, reasons: result.reasons, output: result.output.slice(-6000), commands });
@@ -477,20 +512,21 @@ const fastVerify = node('verify', async s => {
 const escalate = async (s: S): Promise<U> => {
   const module = s.plan!.modules[s.moduleIndex];
   // Unattended (benchmark) runs have nobody to escalate to: out of attempts means failed
+  const archChange = s.archChange ? `The Builder says the requirement does not fit the architecture: ${s.archChange}` : null;
   if (s.autoApprove) {
     getBus().emit(s.runId, { type: 'gate_resolved', gate: 'escalation', decision: 'abort', feedback: 'Out of fix attempts (unattended run)' });
     const why = s.lastVerify?.reasons.join('; ') || 'tests still failing';
-    return { decision: 'abort', status: 'failed', error: `Module "${module.id}" still failing after ${s.attempt} attempts: ${why}` };
+    return { decision: 'abort', status: 'failed', error: archChange ?? `Module "${module.id}" still failing after ${s.attempt} attempts: ${why}` };
   }
   const answer = gate(s, 'escalation', {
     kind: 'escalation',
-    title: `Module "${module.id}" still failing after ${s.attempt} attempts`,
+    title: archChange ? 'The Builder asks for an architecture change' : `Module "${module.id}" still failing after ${s.attempt} attempts`,
     module: module.id,
     attempts: s.attempt,
-    reasons: s.lastVerify?.reasons ?? [],
+    reasons: archChange ? [archChange] : s.lastVerify?.reasons ?? [],
     output: s.lastVerify?.output.slice(-4000) ?? '',
   });
-  if (answer.decision === 'retry') { return { decision: 'retry', attempt: 0, feedback: answer.feedback ?? null }; }
+  if (answer.decision === 'retry') { return { decision: 'retry', attempt: 0, feedback: answer.feedback ?? null, archChange: null }; }
   if (answer.decision === 'replan') { return { decision: 'replan', feedback: answer.feedback ?? `Module "${module.id}" could not be made to pass: ${s.lastVerify?.reasons.join('; ')}` }; }
   return { decision: 'abort', status: 'aborted' };
 };
@@ -521,6 +557,15 @@ const agentNode = (step: AgentStep, nextStep: Step | undefined) => node(step.id,
   const diagramProblems = step.mayWrite.some(p => p === SYSTEM_DIAGRAM || (p.endsWith('/') && SYSTEM_DIAGRAM.startsWith(p))) ? readSystem(s.workspace!.path).errors : [];
   if (diagramProblems.length) {
     await agentTurn({ ...turn, io: { ...io, from: ['System: the diagram file was invalid'] }, continues: true }, `${SYSTEM_DIAGRAM} cannot be drawn:\n${diagramProblems.map(e => `- ${e}`).join('\n')}\nFix the file.`);
+  }
+  // The Architect's design must be one Verify can enforce
+  if (step.instructions === 'builtin:architect') {
+    const problem = architectureProblem(s.workspace!.path);
+    if (problem) {
+      await agentTurn({ ...turn, io: { ...io, from: ['System: the architecture file was invalid'] }, continues: true }, `${problem}. Fix ${ARCHITECTURE_FILE}.`);
+      const still = architectureProblem(s.workspace!.path);
+      if (still) { throw new Error(still); }
+    }
   }
   if (!step.verdict) { return { decision: 'continue' }; }
 
@@ -555,6 +600,14 @@ const gateNode = (def: PipelineDef, step: GateStep) => async (s: S): Promise<U> 
       clauses: requirementClauses(s.requirement),
       contracts: diffSince(s.workspace!).files.filter(f => f.path.startsWith('contracts/')).map(f => f.path),
       specIssue: s.specIssue,
+      reports,
+    };
+  } else if (step.review === 'architecture') {
+    payload = {
+      architecture: (() => { try { return readArchitecture(s.workspace!.path); } catch { return null; } })(),
+      architectureError: architectureProblem(s.workspace!.path),
+      doc: readText(s.workspace!.path, ARCHITECTURE_DOC, 60_000),
+      contracts: pasteFiles(s.workspace!.path, ['contracts/']).map(([path, text]) => ({ path, text })),
       reports,
     };
   } else if (step.review === 'design') {
@@ -643,9 +696,12 @@ export function buildGraph(def: PipelineDef = loadPipeline('standard')) {
   if (isFast(def)) {
     // QA and the Builder start together (one node); Verify judges with both; failures go back to the Builder
     const after = nextNode('build');
-    g.addNode('qa', fastWork(def)).addEdge('setup', 'qa').addEdge('qa', 'verify')
+    // The Architect (and your approval of its design) only runs while the project has no architecture
+    const architect = steps[0].type === 'agent' ? steps[0].id : null;
+    g.addConditionalEdges('setup', (s: S) => (architect && !existsSync(join(s.workspace!.path, ARCHITECTURE_FILE)) ? architect : 'qa'), architect ? [architect, 'qa'] : ['qa'])
+      .addNode('qa', fastWork(def)).addConditionalEdges('qa', (s: S) => (s.archChange ? 'escalate' : 'verify'), ['verify', 'escalate'])
       .addNode('dev', fastDev).addNode('verify', fastVerify).addNode('dispute', qaDispute(def)).addNode('escalate', escalate)
-      .addConditionalEdges('dev', (s: S) => (!s.specIssue ? 'verify' : (s.disputes[MAIN.id] ?? 0) < MAX_DISPUTES ? 'dispute' : 'escalate'), ['verify', 'dispute', 'escalate'])
+      .addConditionalEdges('dev', (s: S) => (s.archChange ? 'escalate' : !s.specIssue ? 'verify' : (s.disputes[MAIN.id] ?? 0) < MAX_DISPUTES ? 'dispute' : 'escalate'), ['verify', 'dispute', 'escalate'])
       .addConditionalEdges('verify', (s: S) => (s.allModulesDone ? after : s.specIssue ? 'dispute' : s.attempt >= maxAttempts ? 'escalate' : 'dev'), [...new Set([after, 'dev', 'dispute', 'escalate'])])
       // No Planner to send a plan problem to: a person decides
       .addConditionalEdges('dispute', (s: S) => (s.specIssue ? 'escalate' : 'dev'), ['dev', 'escalate'])

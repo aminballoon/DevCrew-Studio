@@ -29,7 +29,11 @@ documents and a system diagram, with no code: see [Design pipelines](#design-pip
 `"fast"` has no Planner: it starts with a blind `qa` step and the `build` step, which run at the
 same time. One Builder plans and writes the code and its own tests; QA writes hidden acceptance
 tests from the requirement alone. Verify judges with both, failures go back to the Builder, and
-agent steps and the code gate follow as usual.
+agent steps and the code gate follow as usual. A fast pipeline may open with an Architect
+(`"instructions": "builtin:architect"`, which may write `contracts/`) and a gate with
+`"review": "architecture"`; they run only while the project has no `.devcrew/architecture.json`.
+That file lists the modules, which module may use which (`mayUse`) and each module's `interface`;
+Verify rejects any import that breaks it, on every later run (see `pipelines/fast-arch.json`).
 
 ## Steps
 

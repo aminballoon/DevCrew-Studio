@@ -1,0 +1,18 @@
+{
+  "id": "multi-fast-arch",
+  "code": "FA",
+  "name": "AI team · fast with an architecture",
+  "summary": "The fast team inside a lasting architecture: an Architect (a stronger model) designs the modules, their dependency rules and contracts once; the Builder builds inside them, and the system rejects imports that break the rules.",
+  "agents": 4,
+  "steps": [
+    "Architect designs modules, rules and contracts (only when the project has none)",
+    "Builder plans and codes, QA writes hidden tests (at the same time)",
+    "System runs both test sets and checks the imports → Builder fixes if failing (max 5 rounds)",
+    "Reviewer checks the diff"
+  ],
+  "role": "candidate",
+  "color": "#14b8a6",
+  "mode": "pipeline",
+  "pipeline": "fast-arch",
+  "profile": "claude"
+}

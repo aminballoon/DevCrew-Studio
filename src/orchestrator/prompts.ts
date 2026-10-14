@@ -135,13 +135,38 @@ const runFile = (path: string, what: string) => `${path} with how to run ${what}
    { "testCommand": "the command", "testFormats": ["optional: what it prints, from ${TEST_FORMATS.join(', ')}"] }
    It must print results in one of those formats.`;
 
-export function builderPrompt(requirement: string, clauses: Clause[], guide?: string): string {
+const ARCHITECTURE_SCHEMA = `{
+  "modules": [
+    { "id": "kebab-case", "path": "src/folder/ (or one file)", "purpose": "one plain sentence", "mayUse": ["ids of modules it may import"], "interface": "optional: the only file other modules may import, e.g. src/folder/index.ts" }
+  ],
+  "decisions": [ { "id": "ADR-1", "title": "...", "decision": "...", "why": "..." } ]
+}`;
+
+/** The Architect designs the project's lasting architecture; Verify enforces it on every later run. */
+export function architectPrompt(requirement: string, clauses: Clause[], feedback: string | null): string {
+  return `${header('architect')}
+You are the software architect. Design the architecture this project will keep: every later change is built inside it and checked against it automatically, by people and agents who never talked to you.
+${sourceOfTruth(requirement, clauses)}
+First look at the existing files. If code exists, describe the architecture it already has and change only what this requirement needs.
+
+Write these files, and nothing else (no application code, no tests):
+1. .devcrew/architecture.json, exactly this shape:
+${ARCHITECTURE_SCHEMA}
+   Verify rejects any import from one module into another that "mayUse" does not allow, or that goes past a module's "interface". Keep it small: usually 3 to 7 modules, each using only what it needs, no cycles. Give an "interface" to every module other modules use.
+2. contracts/: the public interface of each module with an interface, in the project's language (a .d.ts file, Python Protocols or stubs, a header), using exactly the names, signatures, errors and formats the requirement gives. The Builder implements them and cannot change them.
+3. .devcrew/ARCHITECTURE.md, one page for the next developer: what each module does, how a request flows through them, each decision and its reason, and where the next likely changes go ("a new kind of X is a new file in Y"). If the requirement mentions later releases, design so they fit without restructuring, but do not build them.
+In C or C++, do not put a class whose private members the Builder must add in a contract header: use free functions, an abstract interface, or a pointer to an implementation struct defined in src/.
+${feedback ? `\nThe approver sent this feedback on your previous design. Address all of it:\n"""\n${feedback}\n"""\n` : ''}
+End with a short summary of the design.`;
+}
+
+export function builderPrompt(requirement: string, clauses: Clause[], guide?: string, architecture: [string, string][] = []): string {
   return `${header('dev', 'main', 1)}
 You are the Builder. You alone plan and write the code for this requirement, with your own tests.
 ${sourceOfTruth(requirement, clauses)}
 A QA engineer is writing acceptance tests from the same requirement right now, without seeing your code. Your work is judged by those hidden tests and by yours. Use exactly the names, paths, signatures, errors and formats the requirement gives, because the hidden tests will.
 
-Do this:
+${architecture.length ? `The project's architecture is fixed. Put each piece of code in the module that owns it, import other modules only as "mayUse" allows and only through their "interface", and implement contracts/ exactly; you cannot change contracts/ or the architecture files. Verify rejects imports that break the rules. If the requirement truly cannot be built inside this architecture, stop and reply with a line starting with "ARCH_CHANGE:" saying what must change and why; a person decides.${filesBlock(architecture)}\n` : ''}Do this:
 1. Look at the existing files, then implement everything the requirement asks, in the project's own language and conventions.
 2. Write tests in tests/ for the behaviour the requirement describes, with the project's own test tool, and run them until they pass. Keep them lean.
 3. Write ${runFile(BUILDER_TESTS, 'your tests')}
@@ -150,10 +175,10 @@ Do not write anything under acceptance/. If the requirement contradicts itself, 
 End with a short summary of what you built.`;
 }
 
-export function fastQaPrompt(requirement: string, clauses: Clause[], guide?: string): string {
+export function fastQaPrompt(requirement: string, clauses: Clause[], guide?: string, contracts: [string, string][] = []): string {
   return `${header('qa')}
 You are the QA engineer. A Builder is writing the code for this requirement right now; you write the acceptance tests that will judge it. The Builder never sees them, only the names and failure messages of the ones that fail.
-${sourceOfTruth(requirement, clauses)}
+${sourceOfTruth(requirement, clauses)}${contracts.length ? `The Builder implements these contracts exactly; test through them.${filesBlock(contracts)}` : ''}
 Do this:
 1. Look at the existing files to learn the language, the test tool and any code there already.
 2. Write acceptance tests under acceptance/ (for example acceptance/main.test.ts) that check every clause, using exactly the names, paths and signatures the requirement gives. Import the code from where the requirement or the existing project says it lives. Where the requirement leaves a name open, test only behaviour you can reach through the names it does give.
@@ -261,6 +286,9 @@ export function agentStepPrompt(step: AgentStep, opts: {
   /** The changes so far, pasted for a step that reads "git diff" (none when too big to paste). */
   diff?: string;
 }): string {
+  if (step.instructions === 'builtin:architect') {
+    return architectPrompt(opts.requirement, opts.clauses ?? [], opts.gateFeedback ?? null).replace(header('architect'), header(step.id, '-', opts.round));
+  }
   if (step.instructions === 'builtin:reviewer') {
     return reviewerPrompt(opts.baseCommit, opts.requirement, opts.clauses, opts.diff).replace(header('reviewer'), header(step.id, '-', opts.round));
   }

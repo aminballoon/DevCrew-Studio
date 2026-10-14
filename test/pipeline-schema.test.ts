@@ -185,5 +185,13 @@ test('a fast pipeline opens with a blind QA and the build, and has no planner', 
   const seeing = { ...fast, steps: fast.steps.map(s => (s.type === 'qa' ? { ...s, blind: false } : s)) };
   assert.ok(validatePipeline(seeing).some(e => /must be blind/.test(e)));
   const swapped = { ...fast, steps: [fast.steps[1], fast.steps[0], ...fast.steps.slice(2)] };
-  assert.ok(validatePipeline(swapped).some(e => /starts with the "qa" step/.test(e)));
+  assert.ok(validatePipeline(swapped).some(e => /Before "qa"/.test(e)));
+  // An Architect may open it, followed by the gate where you approve its design
+  const arch = loadPipeline('fast-arch');
+  assert.deepEqual(validatePipeline(arch), []);
+  const noGate = { ...arch, steps: arch.steps.filter(s => s.id !== 'gate_arch') };
+  assert.ok(validatePipeline(noGate).some(e => /architect step .* then a gate/.test(e)));
+  const inStandard = loadPipeline('standard');
+  const withArchitect = { ...inStandard, steps: [...inStandard.steps.slice(0, -1), { ...arch.steps[0], id: 'arch2' }, inStandard.steps.at(-1)!] };
+  assert.ok(validatePipeline(withArchitect).some(e => /belongs in a fast pipeline/.test(e)));
 });

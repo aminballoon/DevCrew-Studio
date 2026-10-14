@@ -42,7 +42,7 @@ export interface GateStep {
    * What you are shown: the plan (spec, architecture and earlier reports), the code (diff,
    * tests, reviews) or, in a design pipeline, the design (system diagram and reports).
    */
-  review: 'plan' | 'code' | 'design';
+  review: 'plan' | 'code' | 'design' | 'architecture';
   /** Step that gets your feedback when you ask for changes ("build" means Dev). */
   reviseTo: string;
 }
@@ -58,6 +58,7 @@ export interface AgentStep {
   agent?: string;
   /**
    * What to do. "builtin:reviewer" uses DevCrew's standard code-review instructions;
+   * "builtin:architect" designs the project's lasting architecture (fast pipelines, before QA);
    * "guide:<name>" uses the role guide in pipelines/roles/<name>.md.
    */
   instructions: string;
@@ -78,6 +79,9 @@ export interface AgentStep {
     maxRounds?: number;
   };
 }
+
+/** Agent step instructions DevCrew writes itself. */
+export const BUILTIN_AGENTS = ['builtin:reviewer', 'builtin:architect'];
 
 /** Things a role can need from its agent: search and read the web, or run commands. */
 export const CAPABILITIES = ['web', 'shell'] as const;
@@ -183,15 +187,21 @@ export function validatePipeline(raw: unknown): string[] {
   } else if (def.kind === 'fast') {
     // The blind QA and the Builder start together, so they open the pipeline, in that order
     if (count('planner')) { errors.push('A fast pipeline has no "planner" step: the Builder plans its own work.'); }
-    const [qa, build] = steps;
-    if (qa?.type !== 'qa' || build?.type !== 'build') { errors.push('A fast pipeline starts with the "qa" step and then the "build" step; they run at the same time.'); }
+    // Optionally first an Architect and the gate where you approve its design; it runs only when the project has none yet
+    const iQaFast = index('qa');
+    const before = steps.slice(0, Math.max(0, iQaFast));
+    const architectFirst = before.length === 2 && before[0].type === 'agent' && before[0].instructions === 'builtin:architect'
+      && before[1].type === 'gate' && before[1].review === 'architecture';
+    if (before.length && !architectFirst) { errors.push('Before "qa", a fast pipeline may only have the architect step ("builtin:architect") and then a gate with "review": "architecture".'); }
+    const [qa, build] = steps.slice(Math.max(0, iQaFast));
+    if (qa?.type !== 'qa' || build?.type !== 'build') { errors.push('A fast pipeline has the "qa" step and right after it the "build" step; they run at the same time.'); }
     else if (qa.blind !== true) { errors.push('The "qa" step of a fast pipeline must be blind ("blind": true): the Builder never sees its tests.'); }
     if (count('qa') !== 1 || count('build') !== 1) { errors.push('A fast pipeline has exactly one "qa" and one "build" step.'); }
     if (lastStep.type !== 'gate' || lastStep.review !== 'code') {
       errors.push('The last step must be a gate with "review": "code", so you approve the code before it is committed.');
     }
     if (errors.length) { return errors; }
-    iBuild = 1;
+    iBuild = index('build');
   } else {
     for (const type of ['planner', 'qa', 'build'] as const) {
       if (count(type) !== 1) { errors.push(`There must be exactly one "${type}" step (found ${count(type)}).`); }
@@ -223,8 +233,9 @@ export function validatePipeline(raw: unknown): string[] {
     }
     if (s.type === 'gate') {
       if (typeof s.title !== 'string' || !s.title.trim()) { errors.push(`${where}: "title" is required.`); }
-      if (design ? s.review !== 'design' : s.review !== 'plan' && s.review !== 'code') {
-        errors.push(`${where}: "review" must be ${design ? '"design" in a design pipeline' : '"plan" or "code"'}.`);
+      const reviews = design ? ['design'] : def.kind === 'fast' ? ['architecture', 'code'] : ['plan', 'code'];
+      if (!reviews.includes(s.review)) {
+        errors.push(`${where}: "review" must be ${reviews.map(r => `"${r}"`).join(' or ')} in this kind of pipeline.`);
       }
       if (s.review === 'code' && i < iBuild) { errors.push(`${where}: a code review gate must come after "build".`); }
       if (s.review === 'plan' && i > iBuild) { errors.push(`${where}: a plan review gate must come before "build".`); }
@@ -249,9 +260,10 @@ export function validatePipeline(raw: unknown): string[] {
       if (typeof s.instructions === 'string' && s.instructions.startsWith('guide:')) {
         if (!guide) { errors.push(`${where}: "${s.instructions}" is not a guide name (lowercase letters, digits and -).`); }
         else if (!existsSync(guidePath(guide))) { errors.push(`${where}: no role guide pipelines/roles/${guide}.md.`); }
-      } else if (typeof s.instructions !== 'string' || (s.instructions !== 'builtin:reviewer' && s.instructions.trim().length < 20)) {
+      } else if (typeof s.instructions !== 'string' || (!BUILTIN_AGENTS.includes(s.instructions) && s.instructions.trim().length < 20)) {
         errors.push(`${where}: "instructions" must say what to do (at least a sentence), be "builtin:reviewer" or name a guide ("guide:<name>").`);
       }
+      if (s.instructions === 'builtin:architect' && def.kind !== 'fast') { errors.push(`${where}: "builtin:architect" belongs in a fast pipeline.`); }
       if (s.needs !== undefined && (!Array.isArray(s.needs) || s.needs.some(n => !CAPABILITIES.includes(n)))) {
         errors.push(`${where}: "needs" must be a list of ${CAPABILITIES.join(', ')}.`);
       }
@@ -263,7 +275,10 @@ export function validatePipeline(raw: unknown): string[] {
         for (const p of s.mayWrite) {
           if (p === '*' || p === '' || p === '/') { errors.push(`${where}: "mayWrite" cannot be everything; list the files or folders it owns.`); }
           else if (p.startsWith('/') || p.includes('..')) { errors.push(`${where}: "${p}" must be a path inside the project.`); }
-          else if (LOCKED.some(l => p.startsWith(l) || l.startsWith(p))) { errors.push(`${where}: it may not write "${p}": tests and contracts are locked.`); }
+          // The Architect owns the contracts other roles build against
+          else if (LOCKED.some(l => (p.startsWith(l) || l.startsWith(p)) && !(s.instructions === 'builtin:architect' && l === 'contracts/'))) {
+            errors.push(`${where}: it may not write "${p}": tests and contracts are locked.`);
+          }
         }
       }
       if (s.verdict) {

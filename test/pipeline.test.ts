@@ -327,6 +327,30 @@ test('fast pipeline: QA and the Builder start together, the Builder fixes what t
   assert.ok(existsSync(join(workspace, 'acceptance/discounts/discounts.test.ts')));
 });
 
+test('fast-arch: the Architect designs once, Verify enforces it, and the next run builds inside it', { timeout: 90_000 }, async () => {
+  const runs = new RunManager();
+  const requirement = readFileSync(join(TASK, 'requirement.md'), 'utf8');
+  const first = runs.start({ requirement, source: join(TASK, 'seed'), profile: 'fake-fast', autoApprove: true, pipeline: 'fast-arch' });
+  assert.equal(await runs.waitFor(first), 'approved', JSON.stringify(getBus().read(first).filter(e => e.type === 'log' || e.type === 'run_finished')).slice(0, 2000));
+  const events = getBus().read(first);
+  const stages = events.flatMap(e => (e.type === 'node_started' ? [e.node] : []));
+  assert.deepEqual(stages, ['architect', 'qa', 'dev', 'verify', 'dev', 'verify', 'reviewer']);
+  const verifies = events.flatMap(e => (e.type === 'verify_result' ? [e] : []));
+  assert.ok(verifies[0].reasons.includes('Architecture: src/util/carts.ts imports src/cart.ts: module "util" may not use "cart" (it may use: no other module)'), JSON.stringify(verifies[0].reasons));
+  assert.equal(verifies[1].passed, true);
+  // Builder and QA work from the Architect's design and contracts
+  const builderPrompt = events.find(e => e.type === 'agent_input' && e.role === 'dev');
+  assert.match(builderPrompt?.type === 'agent_input' ? builderPrompt.prompt : '', /The project's architecture is fixed[\s\S]*=== \.devcrew\/architecture\.json ===/);
+  const qaPrompt = events.find(e => e.type === 'agent_input' && e.role === 'qa');
+  assert.match(qaPrompt?.type === 'agent_input' ? qaPrompt.prompt : '', /=== contracts\/cart\.d\.ts ===/);
+
+  // The next change starts from the committed project: it has an architecture, so no Architect
+  const workspace = events.find(e => e.type === 'run_started');
+  const second = runs.start({ requirement, source: workspace?.type === 'run_started' ? workspace.workspace : '', profile: 'fake-fast', autoApprove: true, pipeline: 'fast-arch' });
+  assert.equal(await runs.waitFor(second), 'approved');
+  assert.equal(getBus().read(second).flatMap(e => (e.type === 'node_started' ? [e.node] : []))[0], 'qa');
+});
+
 test('blind QA keeps the acceptance tests away from Dev and judges with them', { timeout: 60_000 }, async () => {
   const minimal = loadPipeline('minimal');
   const def: PipelineDef = { ...minimal, id: 'blind-test', steps: minimal.steps.map(s => (s.type === 'qa' ? { ...s, blind: true } : s)) };
