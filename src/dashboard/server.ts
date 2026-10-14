@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
 
 import { STUDIO_ROOT } from '../core/config';
+import { listenDiscord } from '../core/discord';
 import type { GateAnswer } from '../orchestrator/graph';
 import { RunManager } from '../orchestrator/RunManager';
 import { ROLE_CONTRACTS } from '../orchestrator/roles';
@@ -150,3 +151,13 @@ createServer((req, res) => {
 }).listen(PORT, '127.0.0.1', () => {
   console.log(`DevCrew Studio dashboard: http://localhost:${PORT}`);
 });
+
+// Discord buttons answer gates here, where the runs are driven
+for (const ch of getConfig().notify?.channels ?? []) {
+  if (ch.type !== 'discord') { continue; }
+  try {
+    listenDiscord(ch, (runId, decision, feedback) => runs.resolveGate(runId, { decision: decision as GateAnswer['decision'], feedback }));
+  } catch (e) {
+    console.log(`Discord: ${(e as Error).message}`);
+  }
+}

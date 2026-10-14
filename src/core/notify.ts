@@ -1,6 +1,7 @@
 import { createHmac } from 'node:crypto';
 
 import type { DevcrewConfig } from './config';
+import { sendDiscord, type DiscordChannel } from './discord';
 import type { GateId } from './events';
 
 /**
@@ -27,6 +28,7 @@ export type NotifyChannel =
     /** Env var with the route's secret (signed as Generic V2). */
     secretEnv: string;
   }
+  | DiscordChannel
   | {
     type: 'webhook';
     url: string;
@@ -97,6 +99,7 @@ function secret(env: string): string {
 }
 
 export async function send(ch: NotifyChannel, n: GateNotice): Promise<void> {
+  if (ch.type === 'discord') { return sendDiscord(ch, n); }
   let headers: Record<string, string> = { 'content-type': 'application/json' };
   let body: string;
   if (ch.type === 'openclaw') {

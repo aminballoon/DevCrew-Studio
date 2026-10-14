@@ -68,3 +68,31 @@ test('a waiting gate is sent to OpenClaw and Hermes, and the chat agent can answ
     server.close();
   }
 });
+
+test('Discord buttons: only allowed users answer, revise asks for feedback, the buttons go away', async () => {
+  const { gateMessage, handleInteraction } = await import('../src/core/discord');
+  const { gateNotice } = await import('../src/core/notify');
+  const n = gateNotice({ channels: [] }, 'r1', 'gate_spec', { kind: 'spec', title: 'Approve the plan' }, 'Cart');
+  assert.deepEqual(gateMessage(n).components[0].components.map(b => b.custom_id), ['devcrew|r1|approve', 'devcrew|r1|revise', 'devcrew|r1|abort']);
+
+  const calls: unknown[][] = [];
+  const resolve = async (...a: unknown[]) => { calls.push(a); };
+  const click = (user: string, id: string) => ({ type: 3, user: { id: user }, data: { custom_id: id }, message: { content: 'DevCrew run r1 is waiting' } });
+
+  const stranger = await handleInteraction(click('999', 'devcrew|r1|approve'), ['42'], resolve) as any;
+  assert.equal(stranger.data.flags, 64);
+  assert.equal(calls.length, 0);
+
+  const modal = await handleInteraction(click('42', 'devcrew|r1|revise'), ['42'], resolve) as any;
+  assert.equal(modal.type, 9);
+  assert.equal(calls.length, 0);
+
+  const submit = { type: 5, member: { user: { id: '42' } }, message: { content: 'x' }, data: { custom_id: 'devcrew|r1|revise', components: [{ components: [{ custom_id: 'feedback', value: 'cents' }] }] } };
+  const done = await handleInteraction(submit, ['42'], resolve) as any;
+  assert.deepEqual(calls, [['r1', 'revise', 'cents']]);
+  assert.equal(done.type, 7);
+  assert.deepEqual(done.data.components, []);
+
+  const failing = await handleInteraction(click('42', 'devcrew|r1|approve'), ['42'], async () => { throw new Error('Run is not waiting at a gate'); }) as any;
+  assert.match(failing.data.content, /not waiting/);
+});
