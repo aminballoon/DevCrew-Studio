@@ -3,15 +3,18 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, wri
 import { dirname, join, relative, sep } from 'node:path';
 import { isAllowed, type Scope } from '../core/scope';
 
-const IGNORED_DIRS = new Set(['.git', 'node_modules', '.DS_Store', '__pycache__', '.pytest_cache']);
-
 /**
- * Build output the test tools write, which no role authors: the guard must neither track nor
- * delete it (deleting Cargo's target/ forced a full rebuild after every turn).
+ * Folders no role authors: dependencies, caches and the build output test tools write. The guard
+ * neither tracks nor deletes them, and git never commits them. Deleting them is not harmless:
+ * removing Cargo's target/ or PlatformIO's .pio/ after a turn forced a full rebuild on every
+ * Verify, and committing .pio/ object files overflowed git's output buffer (ENOBUFS).
  */
-function buildOutputDirs(workspace: string): Set<string> {
-  return new Set(existsSync(join(workspace, 'Cargo.toml')) ? ['target'] : []);
-}
+export const NOT_AUTHORED = ['.git', 'node_modules', '__pycache__', '.pytest_cache', '.pio', '.venv', '.DS_Store'];
+const IGNORED = new Set(NOT_AUTHORED);
+
+/** Cargo's target/ is build output only in a Cargo project's root. */
+export const rootBuildDirs = (workspace: string): string[] => (existsSync(join(workspace, 'Cargo.toml')) ? ['target'] : []);
+
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 
 /** Contents of every file in a workspace, keyed by POSIX relative path. */
@@ -19,10 +22,10 @@ export type Snapshot = Map<string, Buffer>;
 
 export function takeSnapshot(workspace: string): Snapshot {
   const out: Snapshot = new Map();
-  const buildDirs = buildOutputDirs(workspace);
+  const buildDirs = new Set(rootBuildDirs(workspace));
   const walk = (dir: string) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (IGNORED_DIRS.has(entry.name)) { continue; }
+      if (IGNORED.has(entry.name)) { continue; }
       if (dir === workspace && buildDirs.has(entry.name)) { continue; }
       const full = join(dir, entry.name);
       if (entry.isDirectory()) { walk(full); continue; }

@@ -238,7 +238,8 @@ const dev = (def: PipelineDef) => node('dev', async s => {
     reads: ['.devcrew/PRD.md', 'contracts/', `tests/${module.id}/`, ...earlier],
     to: ['Verify'],
   };
-  const turn = await agentTurn(ctx(s, 'dev', io, module.id), devPrompt(s.plan!, module, attempt, s.lastVerify, s.feedback, earlier, s.requirement, requirementClauses(s.requirement), guideOf(def, 'build'), { blind: isBlind(def) }));
+  // One developer session across modules: it already knows the PRD and contracts, and starts fresh once it grows past the limit
+  const turn = await agentTurn(ctx(s, 'dev', io), devPrompt(s.plan!, module, attempt, s.lastVerify, s.feedback, earlier, s.requirement, requirementClauses(s.requirement), guideOf(def, 'build'), { blind: isBlind(def) }));
   const issue = turn.text.match(/^SPEC_ISSUE:\s*(.+)$/m)?.[1] ?? null;
   return {
     attempt,
@@ -255,10 +256,11 @@ const verifyNode = (def: PipelineDef) => node('verify', async s => {
   const isLast = s.moduleIndex === plan.modules.length - 1;
   const moduleTests = countDeclaredTests(ws, `tests/${module.id}/`);
 
-  // A module is judged by its own tests; the last one also by the whole suite (regressions)
+  // A module is judged by its own tests; the last one by the whole suite instead, which includes
+  // them (running both ran every test of that module twice, on HW-01 two flashes of the board)
   const runs: VerifyResult[] = [];
   const commands: string[] = [];
-  if (plan.moduleTestCommand && moduleTests > 0) {
+  if (plan.moduleTestCommand && moduleTests > 0 && !isLast) {
     commands.push(plan.moduleTestCommand.replaceAll('{module}', module.id));
     runs.push(await verify({ workspace: ws, testCommand: commands[0], baseline: s.baseline!, expectedTests: moduleTests, testFormats: plan.testFormats }));
   }
@@ -269,13 +271,13 @@ const verifyNode = (def: PipelineDef) => node('verify', async s => {
     try {
       const moduleCommand = plan.moduleTestCommand && acceptanceCommand(plan.moduleTestCommand.replaceAll('{module}', module.id));
       const moduleAcceptance = countDeclaredTests(ws, `${ACCEPTANCE}/${module.id}/`);
-      if (moduleCommand && moduleAcceptance > 0) {
+      const allCommand = acceptanceCommand(plan.testCommand);
+      if (moduleCommand && moduleAcceptance > 0 && !(isLast && allCommand)) {
         commands.push(moduleCommand);
         runs.push(await verify({ workspace: ws, testCommand: moduleCommand, baseline: s.baseline!, expectedTests: moduleAcceptance, testFormats: plan.testFormats }));
         acceptanceModuleRun = true;
       }
       // The last module is also judged by every module's acceptance tests (regressions)
-      const allCommand = acceptanceCommand(plan.testCommand);
       if (isLast && allCommand) {
         commands.push(allCommand);
         runs.push(await verify({ workspace: ws, testCommand: allCommand, baseline: s.baseline!, expectedTests: countDeclaredTests(ws, `${ACCEPTANCE}/`), testFormats: plan.testFormats }));
@@ -325,12 +327,26 @@ const verifyNode = (def: PipelineDef) => node('verify', async s => {
   return { lastVerify: result, allModulesDone: result.passed && isLast, feedback: null };
 }, s => ({ module: s.plan!.modules[s.moduleIndex].id, attempt: s.attempt }));
 
-/** Names of failing tests in node --test style output (✖ name (time)). */
-function failingTests(output: string): string[] {
+/** How each supported test tool names a failing test, so the same failure can be spotted twice. */
+const FAILING_TEST = [
+  /^\s*✖ (.+) \([\d.]+m?s\)$/, // node --test
+  /^FAILED (\S+)/, // pytest -v / summary
+  /^(\S+:\d+: \w+).*\[FAILED\]/, // Unity through pio test
+  /^\S+:\d+:(\w+):FAIL/, // plain Unity
+  /HIL:FAIL (\S+?):?(?:\s|$)/, // firmware on the board
+  /^test (\S+) \.\.\. FAILED$/, // cargo test
+  /^--- FAIL: (\S+)/, // go test -v
+  /^not ok \d+ (?:- )?(.+)$/, // TAP
+];
+
+/** Names of failing tests in the output of any supported test tool. */
+export function failingTests(output: string): string[] {
   const names = new Set<string>();
   for (const line of output.split('\n')) {
-    const m = line.match(/^\s*✖ (.+) \([\d.]+m?s\)$/);
-    if (m && m[1] !== 'failing tests:') { names.add(m[1]); }
+    for (const re of FAILING_TEST) {
+      const m = line.match(re);
+      if (m && m[1] !== 'failing tests:') { names.add(m[1].trim()); break; }
+    }
   }
   return [...names];
 }

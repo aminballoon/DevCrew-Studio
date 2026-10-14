@@ -137,7 +137,7 @@ function problems(r: Result, events: DevcrewEvent[]): string[] {
 let md = `# Evolution report: ${values.suite}\n\n`;
 md += `Each arm builds every round on top of what it left in the round before. The hidden tests of round *n* include every earlier round's, so a test that passed in round *n−1* and fails in round *n* is a **regression**: the change broke something that worked.\n\n`;
 
-md += `## Hidden tests per round\n\n| Arm | ${tasks.map((t, i) => `R${i + 1}`).join(' | ')} | Regressions |\n|---|${tasks.map(() => '---|').join('')}---|\n`;
+md += `## Hidden tests per round\n\n| Arm | ${tasks.map((_, i) => `R${i + 1}`).join(' | ')} | Regressions |\n|---|${tasks.map(() => '---|').join('')}---|\n`;
 const regressionsOf = (arm: string) => tasks.slice(1).map((t, i) => {
   const before = get(tasks[i], arm)?.tests ?? {};
   const now = get(t, arm)?.tests ?? {};

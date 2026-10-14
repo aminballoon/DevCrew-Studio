@@ -146,3 +146,26 @@ test('Cargo build output is left alone; a target/ folder in a non-Rust project i
   writeFileSync(join(node, 'target/a.ts'), 'x');
   assert.deepEqual(revertOutOfScope(node, before2, ROLE_SCOPES.qa), ['target/a.ts']);
 });
+
+test('PlatformIO build output is neither guarded, copied nor committed', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { commitAll, diffSince, prepareWorkspace } = await import('../src/guard/workspace');
+  const seed = workspace({ 'src/main.cpp': 'int main() {}\n', '.pio/build/board/a.o': 'obj', 'lib/node_modules/p/i.js': 'dep' });
+  const ws = prepareWorkspace(seed, `pio-${Date.now()}`);
+  const tracked = () => execFileSync('git', ['ls-files'], { cwd: ws.path, encoding: 'utf8' }).trim().split('\n');
+  assert.ok(!existsSync(join(ws.path, '.pio')), 'not copied from the seed');
+  assert.deepEqual(tracked(), ['src/main.cpp']);
+
+  // QA runs pio test: the build tree it leaves must survive the guard and stay out of git
+  const before = takeSnapshot(ws.path);
+  mkdirSync(join(ws.path, '.pio/build/native'), { recursive: true });
+  writeFileSync(join(ws.path, '.pio/build/native/program'), 'binary');
+  writeFileSync(join(ws.path, 'x.cpp'), 'out of scope');
+  assert.deepEqual(revertOutOfScope(ws.path, before, ROLE_SCOPES.qa), ['x.cpp']);
+  assert.ok(existsSync(join(ws.path, '.pio/build/native/program')), 'build output kept');
+
+  writeFileSync(join(ws.path, 'src/relay.cpp'), 'void r() {}\n');
+  assert.deepEqual(diffSince(ws).files.map(f => f.path), ['src/relay.cpp']);
+  commitAll(ws, 'build');
+  assert.deepEqual(tracked(), ['src/main.cpp', 'src/relay.cpp']);
+});

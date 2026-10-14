@@ -87,3 +87,12 @@ test('reads the per-case lines of pio test as Unity results', () => {
   assert.deepEqual(parseTestOutput(pio, ['unity', 'hil']), { tests: { total: 4, pass: 2, fail: 1, skipped: 1 }, format: 'unity' });
   assert.deepEqual(parseTestOutput(pio), { tests: { total: 4, pass: 2, fail: 1, skipped: 1 }, format: 'unity' });
 });
+
+test('failing test names are read from every tool, so blind QA spots the same failure twice', async () => {
+  const { failingTests } = await import('../src/orchestrator/graph');
+  assert.deepEqual(failingTests('✖ adds (1.2ms)\n✖ failing tests:\n'), ['adds']);
+  assert.deepEqual(failingTests('FAILED tests/a/test_x.py::test_limit - AssertionError\n'), ['tests/a/test_x.py::test_limit']);
+  assert.deepEqual(failingTests('tests/p/test_p/t.cpp:12: test_parse: Expected 1 Was 0\t[FAILED]\n'), ['tests/p/test_p/t.cpp:12: test_parse']);
+  assert.deepEqual(failingTests('HIL:FAIL board/test_b.py::test_ack: expected ACK\nHIL:DONE\n'), ['board/test_b.py::test_ack']);
+  assert.deepEqual(failingTests('test frames::crc ... FAILED\n--- FAIL: TestX (0.00s)\nnot ok 2 - rejects\n'), ['frames::crc', 'TestX', 'rejects']);
+});

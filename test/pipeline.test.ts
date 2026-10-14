@@ -34,6 +34,9 @@ test('scripted run goes through every stage, reverts the test tampering and loop
 
   const verdicts = events.flatMap(e => (e.type === 'verify_result' ? [e.passed] : []));
   assert.deepEqual(verdicts, [false, true, true]);
+  // The last module is judged by the whole suite only, not by its own tests a second time
+  const lastCommands = events.findLast(e => e.type === 'verify_result');
+  assert.deepEqual(lastCommands?.type === 'verify_result' && lastCommands.commands, ['node --test']);
   assert.ok(events.some(e => e.type === 'usage' && e.role === 'dev' && e.totalTokens > 0));
 
   // Every agent turn records what it was given and what it handed on
@@ -280,8 +283,8 @@ test('a session past the token limit starts fresh for its next full prompt, and 
     const status = await runs.waitFor(runId);
     assert.equal(status, 'approved', JSON.stringify(getBus().read(runId).filter(e => e.type === 'log' || e.type === 'run_finished')).slice(0, 3000));
     const fresh = getBus().read(runId).flatMap(e => (e.type === 'log' && /starting a fresh session/.test(e.message) ? [e.message.split(':')[0]] : []));
-    // QA's dispute turn and Dev's second cart-core turn reuse a session that is now "too big"
-    assert.deepEqual(fresh, ['qa', 'dev (cart-core)']);
+    // QA's dispute turn, and Dev's turns after its first (one Dev session across modules)
+    assert.deepEqual(fresh, ['qa', 'dev', 'dev']);
   } finally {
     delete cfg.freshSessionAboveTokens;
   }

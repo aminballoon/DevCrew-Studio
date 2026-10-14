@@ -95,8 +95,6 @@ export interface PipelineDef {
 /** Where a role that may write it draws the system architecture diagram (design pipelines). */
 export const SYSTEM_DIAGRAM = '.devcrew/system.json';
 
-export const isDesign = (def: Pick<PipelineDef, 'kind'>) => def.kind === 'design';
-
 // --- Role guides ---
 
 export const ROLES_DIR = join(STUDIO_ROOT, 'pipelines', 'roles');

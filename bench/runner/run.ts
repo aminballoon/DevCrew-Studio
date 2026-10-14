@@ -5,9 +5,10 @@ import { parseArgs } from 'node:util';
 
 import { STUDIO_ROOT } from '../../src/core/config';
 import { usageByRole, type DevcrewEvent } from '../../src/core/events';
+import { NOT_AUTHORED } from '../../src/guard/snapshot';
 import { countDeclaredTests, parseTestCounts, runCommand } from '../../src/guard/verify';
 import { RunManager } from '../../src/orchestrator/RunManager';
-import { cancelRun, closeSessions, getBus } from '../../src/orchestrator/runtime';
+import { cancelRun, getBus } from '../../src/orchestrator/runtime';
 import { runSingle } from '../../src/orchestrator/single';
 import { guidePath } from '../../src/pipeline/schema';
 
@@ -96,7 +97,8 @@ function seedFromEarlierRound(task: Task, arm: Arm, rep: number): string | null 
   if (!workspace || !existsSync(workspace)) { return null; }
   const seed = join(outDir, '.seeds', `${task.id}__${arm.id}__r${rep}`);
   rmSync(seed, { recursive: true, force: true });
-  cpSync(workspace, seed, { recursive: true, filter: src => !/[/\\](node_modules|\.git|hidden-tests|hidden-perf)([/\\]|$)/.test(src.slice(workspace.length)) });
+  const skip = [...NOT_AUTHORED, 'hidden-tests', 'hidden-perf'];
+  cpSync(workspace, seed, { recursive: true, filter: src => !skip.some(d => src.slice(workspace.length).split(/[/\\]/).includes(d)) });
   return seed;
 }
 

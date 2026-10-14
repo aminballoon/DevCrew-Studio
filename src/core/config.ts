@@ -38,14 +38,5 @@ export function loadConfig(path = join(STUDIO_ROOT, 'devcrew.config.json')): Dev
   return JSON.parse(readFileSync(path, 'utf8')) as DevcrewConfig;
 }
 
-export function agentFor(config: DevcrewConfig, profile: string, role: Role): { name: string; spec: AgentSpec } {
-  const roles = config.profiles[profile];
-  if (!roles) { throw new Error(`Unknown profile "${profile}"`); }
-  const name = roles[role];
-  const spec = config.agents[name];
-  if (!spec) { throw new Error(`Profile "${profile}" maps ${role} to unknown agent "${name}"`); }
-  return { name, spec };
-}
-
 export const runDir = (runId: string) => join(DATA_ROOT, 'runs', runId);
 export const eventLogPath = (runId: string) => join(runDir(runId), 'events.jsonl');
