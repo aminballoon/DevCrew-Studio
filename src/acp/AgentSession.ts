@@ -55,6 +55,9 @@ export class AgentSession {
   private context: { used?: number; size?: number } = {};
   /** Sum of usage_update.used this turn, for agents that report no usage on the prompt response. */
   private turnStepTokens = 0;
+  /** Where a turn's time goes: model calls made and characters of hidden thinking. */
+  private turnCalls = 0;
+  private turnThought = 0;
 
   /** Tokens in the conversation after the last model call, when the agent reports it. */
   get contextUsed(): number | undefined { return this.context.used; }
@@ -118,6 +121,8 @@ export class AgentSession {
     this.text = '';
     const costBefore = this.lastCost;
     this.turnStepTokens = 0;
+    this.turnCalls = 0;
+    this.turnThought = 0;
     let timer: NodeJS.Timeout | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
@@ -157,6 +162,7 @@ export class AgentSession {
       this.emit({
         type: 'usage', role: this.opts.role, agent: this.opts.agentName,
         contextUsed: this.context.used, contextSize: this.context.size, ...usage,
+        modelCalls: this.turnCalls, thoughtChars: this.turnThought,
       });
       return { text: this.text, stopReason: response.stopReason, usage };
     } finally {
@@ -237,6 +243,9 @@ export class AgentSession {
           if (this.pending.length > 600 || this.pending.endsWith('\n\n')) { this.flushText(); }
         }
         break;
+      case 'agent_thought_chunk':
+        if (u.content.type === 'text') { this.turnThought += u.content.text.length; }
+        break;
       case 'tool_call':
         this.flushText();
         this.emit({ type: 'tool_call', role: this.opts.role, toolCallId: u.toolCallId, title: u.title, kind: u.kind ?? undefined, status: u.status ?? undefined });
@@ -250,6 +259,7 @@ export class AgentSession {
         // Cost is the session total, not a delta
         this.context = { used: u.used, size: u.size };
         this.turnStepTokens += u.used ?? 0;
+        this.turnCalls++;
         if (u.cost) { this.lastCost = u.cost.amount; }
         break;
     }

@@ -30,6 +30,17 @@ function minutesByRole(ev: DevcrewEvent[]): Record<string, number> {
   return out;
 }
 
+/** Model calls and hidden thinking per role, from agents that report them. */
+function callsByRole(ev: DevcrewEvent[]): Record<string, { calls: number; thought: number }> {
+  const out: Record<string, { calls: number; thought: number }> = {};
+  for (const e of ev) {
+    if (e.type !== 'usage' || e.modelCalls === undefined) { continue; }
+    const r = (out[e.role] ??= { calls: 0, thought: 0 });
+    r.calls += e.modelCalls; r.thought += e.thoughtChars ?? 0;
+  }
+  return out;
+}
+
 /** What went wrong in a run, counted. */
 function problems(ev: DevcrewEvent[]): string[] {
   const n = (f: (e: DevcrewEvent) => boolean) => ev.filter(f).length;
@@ -67,7 +78,8 @@ for (const suite of process.argv.slice(2)) {
   for (const r of results.sort((a, b) => a.task.localeCompare(b.task) || a.arm.localeCompare(b.arm))) {
     const ev = events(r.runId);
     const mins = minutesByRole(ev);
-    const roles = Object.entries(r.tokens.byRole ?? {}).map(([k, v]) => `${k} ${m(v)}/${(mins[k] ?? 0).toFixed(1)}m`).join(', ');
+    const calls = callsByRole(ev);
+    const roles = Object.entries(r.tokens.byRole ?? {}).map(([k, v]) => `${k} ${m(v)}/${(mins[k] ?? 0).toFixed(1)}m${calls[k] ? ` ${calls[k].calls} calls, ${m(calls[k].thought)} thought chars` : ''}`).join(', ');
     console.log(`- ${r.task} ${r.arm} #${r.rep} [${r.runId}] ${r.resolved ? 'RESOLVED' : r.status} ${r.hidden.pass}/${r.hidden.total} · ${m(r.tokens.total)} · ${(r.wallMs / 60_000).toFixed(1)}m${mins.verify ? ` · verify ${mins.verify.toFixed(1)}m` : ''}`);
     if (roles) { console.log(`    ${roles}`); }
     for (const p of problems(ev)) { console.log(`    ${p}`); }

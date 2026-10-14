@@ -38,7 +38,7 @@ export type DevcrewEventBody =
   | { type: 'agent_output'; role: Role; to: string[]; files: HandoffFile[] }
   | { type: 'agent_text'; role: Role; text: string }
   | { type: 'tool_call'; role: Role; toolCallId: string; title: string; kind?: string; status?: string }
-  | ({ type: 'usage'; role: Role; agent: string; contextUsed?: number; contextSize?: number } & UsageNumbers)
+  | ({ type: 'usage'; role: Role; agent: string; contextUsed?: number; contextSize?: number; modelCalls?: number; thoughtChars?: number } & UsageNumbers)
   | { type: 'guard_violation'; role: Role; files: string[]; action: 'reverted' | 'rejected' }
   | { type: 'verify_result'; module: string; attempt: number; passed: boolean; tests: TestCounts; reasons: string[]; output: string; commands?: string[] }
   | { type: 'gate_waiting'; gate: GateId; payload: Record<string, unknown> }
