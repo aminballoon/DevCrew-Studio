@@ -312,5 +312,16 @@
     "fake-blind-wrong": "Harness test, no quota. Blind QA with a wrong hidden test: it fails twice, goes back to QA, and QA fixes it.",
     "claude-haiku": "Claude Haiku 5.5 for every role, isolated from your own Claude setup: the smaller, cheaper model."
   },
-  "$isolatedNote": "claude-isolated copies ANTHROPIC_BASE_URL and the model from ~/.claude/settings.json (it no longer reads that file). Update both here if you change them there."
+  "$isolatedNote": "claude-isolated copies ANTHROPIC_BASE_URL and the model from ~/.claude/settings.json (it no longer reads that file). Update both here if you change them there.",
+  "notify": {
+    "channels": [
+      {
+        "type": "discord",
+        "tokenEnv": "DISCORD_BOT_TOKEN",
+        "userIds": [
+          "241529836164612098"
+        ]
+      }
+    ]
+  }
 }
