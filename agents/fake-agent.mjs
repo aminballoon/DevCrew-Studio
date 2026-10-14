@@ -5,7 +5,9 @@
 // Each turn writes files directly (as real agents do with their own tools), reports
 // tool calls, a message and usage, so the dashboard and guards see realistic traffic.
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
@@ -16,7 +18,7 @@ const delayMs = Number(process.env.FAKE_DELAY_MS ?? script.delayMs ?? 500);
 const delay = ms => new Promise(r => setTimeout(r, ms));
 
 class FakeAgent {
-  constructor(conn) { this.conn = conn; this.calls = new Map(); this.cost = 0; }
+  constructor(conn) { this.conn = conn; this.cost = 0; }
   async initialize() { return { protocolVersion: acp.PROTOCOL_VERSION, agentCapabilities: {} }; }
   async newSession(params) { this.cwd = params.cwd; return { sessionId: 'fake-' + process.pid }; }
   async authenticate() { return {}; }
@@ -28,8 +30,12 @@ class FakeAgent {
     const h = text.match(/\[devcrew role=(\S+) module=(\S+) attempt=(\d+)\]/);
     const role = h?.[1] ?? 'single';
     const key = role === 'dev' ? `dev:${h[2]}` : role;
-    const n = this.calls.get(key) ?? 0;
-    this.calls.set(key, n + 1);
+    // Counted per workspace, not per process: DevCrew may give a role a fresh session mid-run
+    const countFile = path.join(os.tmpdir(), `devcrew-fake-calls-${createHash('sha1').update(this.cwd).digest('hex').slice(0, 12)}.json`);
+    let counts = {};
+    try { counts = JSON.parse(fs.readFileSync(countFile, 'utf8')); } catch { /* first turn in this workspace */ }
+    const n = counts[key] ?? 0;
+    fs.writeFileSync(countFile, JSON.stringify({ ...counts, [key]: n + 1 }));
     const turns = script.turns[key] ?? [];
     const index = role === 'dev' ? Number(h[3]) - 1 : n;
     const turn = turns[Math.min(index, turns.length - 1)];

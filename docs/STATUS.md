@@ -10,7 +10,9 @@ On HW-01 the single agent passed 9/9 in every v2 run; every team run got 0/9. QA
 - **HW-01 seed bug:** `hil/serial.py` imported itself instead of pyserial (its own folder is first on the path), so the tool the requirement tells agents to use never worked, in every arm. Fixed. HIL results before this commit were made with the broken tool.
 - **Run end:** a run stopped by the benchmark time limit was recorded as finished twice ("Time limit" then "Run cancelled"); now once. An unattended run that runs out of fix attempts now says which module and why, instead of failing with no reason.
 - Already fixed earlier today, seen in the same runs: `spawnSync git ENOBUFS` (r2), pio output parsing and pio not on PATH (v1).
-- Not rerun yet. Tests: 54.
+- **Fresh sessions past 100k tokens:** every model call re-reads the whole conversation, so a session that has grown big makes even a one-command turn expensive (HW-01: QA's dispute turn with one tool call cost 650k tokens; Dev's one-command retries 170-340k). A session holding more than `freshSessionAboveTokens` (default 100,000) now starts fresh for its next full prompt; short follow-ups that rely on the earlier conversation ("the plan file was invalid", "no tests were found", single-agent fix turns) keep it. Logged as "starting a fresh session".
+- Fake agent counts its scripted turns per workspace, not per process, so a fresh session continues the script.
+- Not rerun yet. Tests: 55.
 
 ## Latest changes (2026-10-14, gates on your phone)
 - **Discord bot with buttons** (`"type": "discord"`): gates arrive as a DM with Approve/Revise/Abort buttons; Revise opens a feedback form; only listed user ids may answer. No AI and no cost. The dashboard keeps a Gateway websocket open for clicks (Node's built-in WebSocket, so Node 22+). Tried with a real bot: the DM with buttons arrives. The message now carries the review (plan: goal, modules, ACs, uncovered sentences + PRD.md; code: tests, files, cost, reviewer verdicts + changes.diff; escalation: reasons + test output), and text typed in the DM becomes a comment you send as Approve with note / Revise / Cancel (DIRECT_MESSAGES intent, not privileged).

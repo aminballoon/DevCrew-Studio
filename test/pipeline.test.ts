@@ -270,6 +270,23 @@ test('a disputed test goes back to QA, not to a new plan', { timeout: 60_000 }, 
   assert.deepEqual(events.flatMap(e => (e.type === 'verify_result' ? [e.passed] : [])), [true, true]);
 });
 
+test('a session past the token limit starts fresh for its next full prompt, and the run still works', { timeout: 60_000 }, async () => {
+  const { getConfig } = await import('../src/orchestrator/runtime');
+  const cfg = getConfig();
+  cfg.freshSessionAboveTokens = 1;
+  try {
+    const runs = new RunManager();
+    const runId = runs.start({ requirement: readFileSync(join(TASK, 'requirement.md'), 'utf8'), source: join(TASK, 'seed'), profile: 'fake-dispute', autoApprove: true });
+    const status = await runs.waitFor(runId);
+    assert.equal(status, 'approved', JSON.stringify(getBus().read(runId).filter(e => e.type === 'log' || e.type === 'run_finished')).slice(0, 3000));
+    const fresh = getBus().read(runId).flatMap(e => (e.type === 'log' && /starting a fresh session/.test(e.message) ? [e.message.split(':')[0]] : []));
+    // QA's dispute turn and Dev's second cart-core turn reuse a session that is now "too big"
+    assert.deepEqual(fresh, ['qa', 'dev (cart-core)']);
+  } finally {
+    delete cfg.freshSessionAboveTokens;
+  }
+});
+
 test('blind QA keeps the acceptance tests away from Dev and judges with them', { timeout: 60_000 }, async () => {
   const minimal = loadPipeline('minimal');
   const def: PipelineDef = { ...minimal, id: 'blind-test', steps: minimal.steps.map(s => (s.type === 'qa' ? { ...s, blind: true } : s)) };

@@ -156,7 +156,7 @@ const planner = (def: PipelineDef) => node('planner', async s => {
       return { plan: readPlan(s.workspace!.path, clauses), feedback: null, revisedTo: null, replans: s.plan && !s.revisedTo ? s.replans + 1 : s.replans };
     } catch (e) {
       if (fix === 2) { throw e; }
-      await agentTurn(ctx(s, 'planner', { ...io, from: ['System: the plan file was invalid'] }), `Your plan is unusable: ${(e as Error).message}. Fix .devcrew/PRD.md and .devcrew/plan.json.`);
+      await agentTurn({ ...ctx(s, 'planner', { ...io, from: ['System: the plan file was invalid'] }), continues: true }, `Your plan is unusable: ${(e as Error).message}. Fix .devcrew/PRD.md and .devcrew/plan.json.`);
     }
   }
 });
@@ -172,11 +172,11 @@ const qa = (def: PipelineDef) => node('qa', async s => {
     getBus().emit(s.runId, { type: 'log', level: 'warn', message: `QA found a problem outside the tests: ${m[1]}` });
   }
   if (countDeclaredTests(s.workspace!.path) === 0) {
-    await agentTurn(ctx(s, 'qa', { ...io, from: ['System: no tests were found'] }), 'No test cases were found under tests/. Write the tests now.');
+    await agentTurn({ ...ctx(s, 'qa', { ...io, from: ['System: no tests were found'] }), continues: true }, 'No test cases were found under tests/. Write the tests now.');
   }
   if (blind) {
     if (countDeclaredTests(s.workspace!.path, `${ACCEPTANCE}/`) === 0) {
-      await agentTurn(ctx(s, 'qa', { ...io, from: ['System: no acceptance tests were found'] }), `No test cases were found under ${ACCEPTANCE}/. Write the acceptance tests now.`);
+      await agentTurn({ ...ctx(s, 'qa', { ...io, from: ['System: no acceptance tests were found'] }), continues: true }, `No test cases were found under ${ACCEPTANCE}/. Write the acceptance tests now.`);
     }
     hideAcceptance(s);
   }
@@ -379,7 +379,7 @@ const agentNode = (step: AgentStep, nextStep: Step | undefined) => node(step.id,
   // One chance to fix a diagram the dashboard cannot draw
   const diagramProblems = step.mayWrite.some(p => p === SYSTEM_DIAGRAM || (p.endsWith('/') && SYSTEM_DIAGRAM.startsWith(p))) ? readSystem(s.workspace!.path).errors : [];
   if (diagramProblems.length) {
-    await agentTurn({ ...turn, io: { ...io, from: ['System: the diagram file was invalid'] } }, `${SYSTEM_DIAGRAM} cannot be drawn:\n${diagramProblems.map(e => `- ${e}`).join('\n')}\nFix the file.`);
+    await agentTurn({ ...turn, io: { ...io, from: ['System: the diagram file was invalid'] }, continues: true }, `${SYSTEM_DIAGRAM} cannot be drawn:\n${diagramProblems.map(e => `- ${e}`).join('\n')}\nFix the file.`);
   }
   if (!step.verdict) { return { decision: 'continue' }; }
 

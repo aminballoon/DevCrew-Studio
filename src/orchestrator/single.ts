@@ -47,7 +47,7 @@ export async function runSingle(opts: SingleRunOptions): Promise<{ runId: string
         bus.emit(runId, { type: 'node_finished', node: 'verify' });
         if (passed || attempt >= max) { break; }
         bus.emit(runId, { type: 'node_started', node: 'single', attempt: attempt + 1 });
-        await agentTurn({ ...ctx, io: { from: ['Verify: why the tests failed'], reads: [], to } }, `The test suite does not pass:\n${reasons.join('\n')}\n\n\`\`\`\n${run.output.slice(-4000)}\n\`\`\`\nFix the implementation. Do not weaken or skip tests.`);
+        await agentTurn({ ...ctx, io: { from: ['Verify: why the tests failed'], reads: [], to }, continues: true }, `The test suite does not pass:\n${reasons.join('\n')}\n\n\`\`\`\n${run.output.slice(-4000)}\n\`\`\`\nFix the implementation. Do not weaken or skip tests.`);
         bus.emit(runId, { type: 'node_finished', node: 'single' });
       }
     }

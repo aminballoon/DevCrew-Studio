@@ -23,6 +23,8 @@ export interface DevcrewConfig {
   profileNotes?: Record<string, string>;
   maxFixAttempts: number;
   turnTimeoutMinutes: number;
+  /** A session holding more tokens than this starts fresh for its next full prompt (default 100,000). */
+  freshSessionAboveTokens?: number;
   /** Chat agents (OpenClaw, Hermes) that bring gate questions to your phone. */
   notify?: NotifyConfig;
 }

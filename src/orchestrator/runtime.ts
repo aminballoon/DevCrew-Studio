@@ -38,7 +38,16 @@ export interface TurnContext {
   agentName?: string;
   /** Overrides the config's per-turn limit, e.g. a single agent that does the whole task in one turn. */
   turnTimeoutMs?: number;
+  /** The prompt only makes sense after the previous one (a short follow-up), so keep the session whatever its size. */
+  continues?: boolean;
 }
+
+/**
+ * A session whose conversation is bigger than this starts fresh for its next full prompt.
+ * Every model call re-reads the whole conversation: on HW-01 a one-command QA turn in a
+ * 320k-token session cost 650k tokens, where a fresh agent reads the files it needs for far less.
+ */
+export const FRESH_SESSION_ABOVE_TOKENS = 100_000;
 
 /** The agent for a role: the step's own choice, the profile's mapping, or the profile's reviewer. */
 /**
@@ -95,6 +104,12 @@ export async function agentTurn(ctx: TurnContext, prompt: string): Promise<TurnR
   const cfg = getConfig();
   const id = `${ctx.runId}:${ctx.role}:${ctx.key ?? ''}`;
   let session = sessions.get(id);
+  if (session && !ctx.continues && (session.contextUsed ?? 0) > (cfg.freshSessionAboveTokens ?? FRESH_SESSION_ABOVE_TOKENS)) {
+    getBus().emit(ctx.runId, { type: 'log', level: 'info', message: `${ctx.role}${ctx.key ? ` (${ctx.key})` : ''}: starting a fresh session; the last one held ${session.contextUsed!.toLocaleString('en-US')} tokens` });
+    session.close();
+    sessions.delete(id);
+    session = undefined;
+  }
   if (!session) {
     const { name, spec } = agentForTurn(cfg, ctx);
     session = await AgentSession.start({

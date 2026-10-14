@@ -55,6 +55,9 @@ export class AgentSession {
   private context: { used?: number; size?: number } = {};
   /** Sum of usage_update.used this turn, for agents that report no usage on the prompt response. */
   private turnStepTokens = 0;
+
+  /** Tokens in the conversation after the last model call, when the agent reports it. */
+  get contextUsed(): number | undefined { return this.context.used; }
   private exited?: Error;
 
   private constructor(
