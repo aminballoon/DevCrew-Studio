@@ -12,7 +12,19 @@
   - static import checks cover ~80% of architecture rules, an LLM judge agrees poorly with them (r = 0.21), and every added constraint costs correctness (2605.06445, -27 points).
 - **`fast-arch` pipeline** (arm FA): the project keeps `.devcrew/architecture.json` (modules, `mayUse`, `interface`), `ARCHITECTURE.md` and `contracts/`. An Architect (`builtin:architect`, Sonnet for the Haiku profile) writes them only while the project has none, and you approve them at a new `architecture` gate. The Builder gets them in its prompt and cannot change them; QA tests through the contracts; a Builder that cannot fit the requirement answers `ARCH_CHANGE` and a person decides. `src/guard/architecture.ts` resolves TS/JS and Python imports; Verify fails on any import a module may not make or that goes past an interface (also in standard pipelines, on the last module, when the file exists).
 - Running: loop `loop-f1` (fast), `loop-i3` (minimal, 2 reps), roadmap `roadmap-fast-base` (fast, the baseline for extensibility) and `roadmap-fast-arch`. Earlier roadmap result for comparison: team code cost 2.5-6x more to extend than single-agent code.
-- Tests: 63.
+- **Results on the simple set** (S-01, L-01, L-02, L-03; Haiku; `bench/loop.sh` runs the four tasks in parallel, about 12 min a round):
+
+  | Arm | Hidden | Tokens/task | Min/task |
+  |---|---|---|---|
+  | minimal, round 0 (before the loop) | 80% | 8.0M | 16.5 |
+  | minimal, round 3 (`loop-i3`, 2 reps) | 100% | 1.5M | 7.5 |
+  | fast (`loop-f1`, 2 reps) | 100% | 2.1M | 5.5 |
+  | fast-arch (`loop-fa1`, 1 rep) | 100% | 3.2M | 8.3 |
+  | single agent | 100% | 0.66M | 2.1 |
+
+  The Architect itself is cheap (Sonnet, ~50k tokens, under a minute); fast-arch's extra time is the Builder's (more files) and one L-01 run that a TAP counting bug failed five times (fixed: node's `# tests` totals now win over top-level lines that count describe blocks).
+- **Short extensibility check** (`ext-short`: XL-06 build, then XL-07 by the same single agent; 1 rep): both arms 8/8 then 13/13, no regressions. The handoff cost $0.11 / 1.56M tokens on fast's code (464 lines, 11 files) and $0.15 / 2.04M on fast-arch's (661 lines, 22 files); earlier single-agent code cost $0.03-0.12. On a task this small, the architecture made more code and no cheaper extension; one round and one rep cannot show more. The handoff agent is also not held to the architecture, so this does not measure the enforcement.
+- Tests: 64.
 
 ## Latest changes (2026-10-14 night, tuning loop on Claude Haiku)
 Loop: run S-01, L-01, L-02, L-03 (82 hidden tests per arm) for the team (`multi-minimal`) and the single agent, read `npx tsx bench/runner/loop-report.ts <suite>`, fix the biggest waste, run again. Suites `loop-i0`, `loop-i1`, `loop-i2`.
