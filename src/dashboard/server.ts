@@ -156,7 +156,11 @@ createServer((req, res) => {
 for (const ch of getConfig().notify?.channels ?? []) {
   if (ch.type !== 'discord') { continue; }
   try {
-    listenDiscord(ch, (runId, decision, feedback) => runs.resolveGate(runId, { decision: decision as GateAnswer['decision'], feedback }));
+    listenDiscord(ch, {
+      resolve: (runId, decision, feedback) => runs.resolveGate(runId, { decision: decision as GateAnswer['decision'], feedback }),
+      waiting: () => runs.list().filter(r => r.status === 'waiting').map(r => r.runId),
+      decisionsOf: runId => runs.waitingDecisions(runId),
+    });
   } catch (e) {
     console.log(`Discord: ${(e as Error).message}`);
   }

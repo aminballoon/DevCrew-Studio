@@ -12,6 +12,10 @@ The chat agent must reach the dashboard (`npm run dashboard`, http://127.0.0.1:4
 ## Discord bot with buttons (free, no AI)
 DevCrew sends the gate to your own Discord bot as a message with **Approve / Revise / Abort** buttons (Retry / Replan / Abort for an escalation). Revise opens a form for your feedback. After a click the buttons are replaced by the answer. Only the user ids in `userIds` can answer; anyone else gets "not allowed". Discord bots cost nothing.
 
+The message carries the review itself: for the plan gate the goal, modules, acceptance criteria and requirement sentences nobody covers, with PRD.md attached; for the code gate the test result, changed files, cost and each reviewer's verdict, with `changes.diff` and the reviews attached; for an escalation the reasons and the last test output.
+
+To comment, type in the DM (or reply to a gate message when several runs wait). The bot asks what the comment is: Approve with this note, Revise with this comment, or Cancel.
+
 1. Make a private server for yourself (Discord app → + → Create my own → For me and my friends). A bot can only DM people it shares a server with.
 2. https://discord.com/developers/applications → New Application → **Bot** → Reset Token, copy it. No privileged intents are needed.
 3. **Installation** (or OAuth2 → URL Generator): scope `bot`, permission Send Messages; open the link and add the bot to your server.

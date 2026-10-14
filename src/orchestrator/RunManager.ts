@@ -87,6 +87,14 @@ export class RunManager {
     return lines.join('\n\n');
   }
 
+  /** Answers the gate a run waits at takes (none when it is not waiting). */
+  waitingDecisions(runId: string): string[] {
+    const events = getBus().read(runId);
+    const lastWait = events.findLastIndex(e => e.type === 'gate_waiting');
+    if (lastWait < 0 || events.slice(lastWait).some(e => e.type === 'gate_resolved' || e.type === 'run_finished')) { return []; }
+    return gateDecisions((events[lastWait] as Extract<DevcrewEvent, { type: 'gate_waiting' }>).payload);
+  }
+
   /** The pipeline a run was started with; runs from before pipelines existed used the standard one. */
   private pipelineOf(runId: string): PipelineDef {
     const started = getBus().read(runId).find(e => e.type === 'run_started');

@@ -73,26 +73,58 @@ test('Discord buttons: only allowed users answer, revise asks for feedback, the 
   const { gateMessage, handleInteraction } = await import('../src/core/discord');
   const { gateNotice } = await import('../src/core/notify');
   const n = gateNotice({ channels: [] }, 'r1', 'gate_spec', { kind: 'spec', title: 'Approve the plan' }, 'Cart');
-  assert.deepEqual(gateMessage(n).components[0].components.map(b => b.custom_id), ['devcrew|r1|approve', 'devcrew|r1|revise', 'devcrew|r1|abort']);
+  assert.deepEqual(gateMessage(n).body.components[0].components.map(b => b.custom_id), ['devcrew|r1|approve', 'devcrew|r1|revise', 'devcrew|r1|abort']);
 
   const calls: unknown[][] = [];
-  const resolve = async (...a: unknown[]) => { calls.push(a); };
+  const host = { resolve: async (...a: unknown[]) => { calls.push(a); }, waiting: () => ['r1'], decisionsOf: () => ['approve', 'revise', 'abort'] };
   const click = (user: string, id: string) => ({ type: 3, user: { id: user }, data: { custom_id: id }, message: { content: 'DevCrew run r1 is waiting' } });
 
-  const stranger = await handleInteraction(click('999', 'devcrew|r1|approve'), ['42'], resolve) as any;
+  const stranger = await handleInteraction(click('999', 'devcrew|r1|approve'), ['42'], host) as any;
   assert.equal(stranger.data.flags, 64);
   assert.equal(calls.length, 0);
 
-  const modal = await handleInteraction(click('42', 'devcrew|r1|revise'), ['42'], resolve) as any;
+  const modal = await handleInteraction(click('42', 'devcrew|r1|revise'), ['42'], host) as any;
   assert.equal(modal.type, 9);
   assert.equal(calls.length, 0);
 
   const submit = { type: 5, member: { user: { id: '42' } }, message: { content: 'x' }, data: { custom_id: 'devcrew|r1|revise', components: [{ components: [{ custom_id: 'feedback', value: 'cents' }] }] } };
-  const done = await handleInteraction(submit, ['42'], resolve) as any;
+  const done = await handleInteraction(submit, ['42'], host) as any;
   assert.deepEqual(calls, [['r1', 'revise', 'cents']]);
   assert.equal(done.type, 7);
   assert.deepEqual(done.data.components, []);
 
-  const failing = await handleInteraction(click('42', 'devcrew|r1|approve'), ['42'], async () => { throw new Error('Run is not waiting at a gate'); }) as any;
+  const failing = await handleInteraction(click('42', 'devcrew|r1|approve'), ['42'], { ...host, resolve: async () => { throw new Error('Run is not waiting at a gate'); } }) as any;
   assert.match(failing.data.content, /not waiting/);
+});
+
+test('Discord: the plan gate shows criteria and uncovered sentences, a typed comment becomes a choice', async () => {
+  const { gateMessage, handleMessage, handleInteraction } = await import('../src/core/discord');
+  const { gateNotice } = await import('../src/core/notify');
+  const prd = '# PRD\n\n## Goal\nA cart in cents.\n\n## Acceptance Criteria\n- AC-1 Adds items.\n- AC-2 Rejects negative prices.\n';
+  const payload = { kind: 'plan', title: 'Review the plan', prd, clauses: [{ id: 'R-1', text: 'Add items' }, { id: 'R-2', text: 'Trim titles' }],
+    plan: { modules: [{ id: 'core', title: 'Core' }], coverage: { 'R-1': ['AC-1'], 'R-2': [] } } };
+  const { body, files } = gateMessage(gateNotice({ channels: [] }, 'r1', 'gate_spec', payload, 'Cart'), payload);
+  const text = JSON.stringify(body.embeds);
+  assert.match(text, /A cart in cents/);
+  assert.match(text, /AC-2\*\* Rejects negative prices/);
+  assert.match(text, /Not covered: R-2/);
+  assert.match(text, /Added by the Planner[^"]*AC-2/);
+  assert.deepEqual(files.map(f => f.name), ['PRD.md']);
+
+  const calls: unknown[][] = [];
+  const host = { resolve: async (...a: unknown[]) => { calls.push(a); }, waiting: () => ['20261014-abcdef'], decisionsOf: () => ['approve', 'revise', 'abort'] };
+  assert.equal(handleMessage({ author: { id: '7' }, content: 'hi' }, ['42'], host), null);
+  const ask = handleMessage({ id: 'm1', author: { id: '42' }, content: 'keep prices in cents' }, ['42'], host) as any;
+  const ids = ask.components[0].components.map((b: any) => b.custom_id);
+  assert.deepEqual(ids.map((x: string) => x.split('|')[2]), ['approve', 'revise', 'cancel']);
+  const done = await handleInteraction({ type: 3, user: { id: '42' }, data: { custom_id: ids[1] }, message: { content: 'c' } }, ['42'], host) as any;
+  assert.deepEqual(calls, [['20261014-abcdef', 'revise', 'keep prices in cents']]);
+  assert.equal(done.type, 7);
+
+  // Two runs waiting and no reply-to: ask which one
+  const two = handleMessage({ author: { id: '42' }, content: 'x' }, ['42'], { ...host, waiting: () => ['a', 'b'] }) as any;
+  assert.match(two.content, /Reply to the gate message/);
+  // A reply to a gate message picks that run
+  const replied = handleMessage({ author: { id: '42' }, content: 'ok', referenced_message: { content: 'DevCrew run `20261014-abcdef` is waiting' } }, ['42'], { ...host, waiting: () => ['20261014-abcdef', 'b'] }) as any;
+  assert.match(replied.content, /20261014-abcdef/);
 });

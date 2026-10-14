@@ -98,8 +98,8 @@ function secret(env: string): string {
   return v;
 }
 
-export async function send(ch: NotifyChannel, n: GateNotice): Promise<void> {
-  if (ch.type === 'discord') { return sendDiscord(ch, n); }
+export async function send(ch: NotifyChannel, n: GateNotice, payload: Record<string, unknown> = {}): Promise<void> {
+  if (ch.type === 'discord') { return sendDiscord(ch, n, payload); }
   let headers: Record<string, string> = { 'content-type': 'application/json' };
   let body: string;
   if (ch.type === 'openclaw') {
@@ -128,6 +128,6 @@ export async function notifyGate(cfg: DevcrewConfig, runId: string, gate: GateId
   const nc = cfg.notify;
   if (!nc?.channels?.length) { return []; }
   const notice = gateNotice(nc, runId, gate, payload, requirement);
-  const results = await Promise.allSettled(nc.channels.map(ch => send(ch, notice)));
+  const results = await Promise.allSettled(nc.channels.map(ch => send(ch, notice, payload)));
   return results.flatMap(r => (r.status === 'rejected' ? [`Gate notification failed: ${(r.reason as Error).message}`] : []));
 }
