@@ -2,6 +2,18 @@
 
 อัปเดตล่าสุด: 2026-10-14
 
+## Latest changes (2026-10-14 night, fast pipelines and an enforced architecture)
+- **Why:** loop rounds 0-2 showed the team paying a fresh session, a full read and a new plan per role (6.4 min per task against 2.1 for one agent, same result). Published work agrees: one writer plus independent checks (Cognition, Aider architect/editor, Anthropic), fewer agents cost less (AgentCoder 57k tokens vs MetaGPT 138k, ChatDev 184k).
+- **`fast` pipeline** (kind `fast`, arm F, default in the New run form): no Planner. The Builder plans, codes and tests in one session while a blind QA writes hidden acceptance tests from the requirement in its own copy of the project, at the same time. Verify runs both; failures go back to the Builder (names and messages of hidden tests only); a repeated hidden failure goes to QA; the reviewer gets the diff in its prompt.
+- **What keeps code extensible** (the user's concern: code that runs but cannot be built on), from the research:
+  - repository overview files barely change what agents do (arXiv 2602.11988: no gain, +20% cost; 2607.27250: no effect on correctness in 288 runs) and adherence fades as a session goes on (2605.10039);
+  - concrete module and dependency specs do help, most for weaker models and in machine-readable form (2608.21747: Sonnet 5.1 → 8.4/10 on architecture with a spec; Haiku 5.6 prose → 7.3 OpenAPI);
+  - agents do not fix design on their own (2511.04824: design smells unchanged over 15,451 agent refactorings; SWE-CI 2603.03823: all 20 models below human code on maintainability, only Opus kept a zero-regression rate above 0.5);
+  - static import checks cover ~80% of architecture rules, an LLM judge agrees poorly with them (r = 0.21), and every added constraint costs correctness (2605.06445, -27 points).
+- **`fast-arch` pipeline** (arm FA): the project keeps `.devcrew/architecture.json` (modules, `mayUse`, `interface`), `ARCHITECTURE.md` and `contracts/`. An Architect (`builtin:architect`, Sonnet for the Haiku profile) writes them only while the project has none, and you approve them at a new `architecture` gate. The Builder gets them in its prompt and cannot change them; QA tests through the contracts; a Builder that cannot fit the requirement answers `ARCH_CHANGE` and a person decides. `src/guard/architecture.ts` resolves TS/JS and Python imports; Verify fails on any import a module may not make or that goes past an interface (also in standard pipelines, on the last module, when the file exists).
+- Running: loop `loop-f1` (fast), `loop-i3` (minimal, 2 reps), roadmap `roadmap-fast-base` (fast, the baseline for extensibility) and `roadmap-fast-arch`. Earlier roadmap result for comparison: team code cost 2.5-6x more to extend than single-agent code.
+- Tests: 63.
+
 ## Latest changes (2026-10-14 night, tuning loop on Claude Haiku)
 Loop: run S-01, L-01, L-02, L-03 (82 hidden tests per arm) for the team (`multi-minimal`) and the single agent, read `npx tsx bench/runner/loop-report.ts <suite>`, fix the biggest waste, run again. Suites `loop-i0`, `loop-i1`, `loop-i2`.
 
