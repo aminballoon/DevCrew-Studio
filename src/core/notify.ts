@@ -118,11 +118,13 @@ export async function send(ch: NotifyChannel, n: GateNotice, payload: Record<str
   if (!res.ok) { throw new Error(`${ch.type} ${ch.url} answered ${res.status} ${(await res.text()).slice(0, 200)}`); }
 }
 
-/** Sends a gate to every channel; returns one line per failure (a broken channel never stops a run). */
-export async function notifyGate(cfg: DevcrewConfig, runId: string, gate: GateId, payload: Record<string, unknown>, requirement: string): Promise<string[]> {
+/** Sends a gate to every channel; returns one line per channel (a broken channel never stops a run). */
+export async function notifyGate(cfg: DevcrewConfig, runId: string, gate: GateId, payload: Record<string, unknown>, requirement: string): Promise<{ level: 'info' | 'warn'; message: string }[]> {
   const nc = cfg.notify;
   if (!nc?.channels?.length) { return []; }
   const notice = gateNotice(nc, runId, gate, payload, requirement);
   const results = await Promise.allSettled(nc.channels.map(ch => send(ch, notice, payload)));
-  return results.flatMap(r => (r.status === 'rejected' ? [`Gate notification failed: ${(r.reason as Error).message}`] : []));
+  return results.map((r, i) => (r.status === 'rejected'
+    ? { level: 'warn' as const, message: `Gate notification failed: ${(r.reason as Error).message}` }
+    : { level: 'info' as const, message: `Gate question sent to ${nc.channels[i].type}` }));
 }

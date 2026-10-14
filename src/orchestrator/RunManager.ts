@@ -199,8 +199,8 @@ export class RunManager {
         if (waiting) {
           const { gate, ...payload } = waiting.value as { gate: GateId } & Record<string, unknown>;
           // Before gate_waiting: the CLI exits on that event, and the question must reach your phone first
-          for (const message of await notifyGate(getConfig(), runId, gate, payload, this.requirementOf(runId))) {
-            bus.emit(runId, { type: 'log', level: 'warn', message });
+          for (const { level, message } of await notifyGate(getConfig(), runId, gate, payload, this.requirementOf(runId))) {
+            bus.emit(runId, { type: 'log', level, message });
           }
           bus.emit(runId, { type: 'gate_waiting', gate, payload });
         } else {

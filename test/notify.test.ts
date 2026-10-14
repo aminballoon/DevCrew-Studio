@@ -55,7 +55,8 @@ test('a waiting gate is sent to OpenClaw and Hermes, and the chat agent can answ
     assert.equal(JSON.parse(he.body).runId, runId);
 
     // A broken channel is logged, never stops the run
-    assert.ok(getBus().read(runId).some(e => e.type === 'log' && e.message.includes('/broken')));
+    assert.ok(getBus().read(runId).some(e => e.type === 'log' && e.level === 'warn' && e.message.includes('/broken')));
+    assert.ok(getBus().read(runId).some(e => e.type === 'log' && e.level === 'info' && e.message === 'Gate question sent to hermes'));
 
     const text = runs.waitingGateText(runId);
     assert.ok(text?.includes('Answers: approve, revise, abort'), text ?? '');
