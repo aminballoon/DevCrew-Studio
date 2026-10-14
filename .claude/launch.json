@@ -16,7 +16,7 @@
       "runtimeArgs": [
         "DEVCREW_NO_NOTIFY=1",
         "PORT=4318",
-        "DEVCREW_DATA=/private/tmp/claude-501/-Users-aminballoon-DevCrew-Studio/889cd6b9-ff2c-4737-8a30-3374e3e50b31/scratchpad/devcrew-data",
+        "DEVCREW_DATA=.devcrew-data/quiet",
         "npm",
         "run",
         "dashboard"
