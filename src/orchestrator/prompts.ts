@@ -69,7 +69,7 @@ ${requirement}
 """
 
 ${earlierReports(earlier)}
-First look at the existing files in this workspace. If code already exists, write .devcrew/adr/0000-existing-architecture.md describing it before designing anything new.
+First look at the existing files in this workspace. Only if it already has source code (more than a README), write .devcrew/adr/0000-existing-architecture.md describing it before designing anything new.
 
 Write these files (and only files under .devcrew/ and contracts/):
 1. .devcrew/PRD.md — goal, out of scope, and numbered Acceptance Criteria (AC-1, AC-2, ...) that are concrete and testable. Keep it short: one criterion per rule the requirement states, in the requirement's own words where possible; no user stories, no restating of the requirement, nothing the requirement does not ask for. Every word you write is read again by QA, the developer and the reviewers.
@@ -83,6 +83,7 @@ ${PLAN_SCHEMA}
 ${clauses.length ? `   "coverage" maps EVERY requirement clause below to the acceptance criteria that cover it. Each clause must be covered in full, word for word: if a clause says two things (for example "is trimmed and must be 1 to 100 characters"), the criteria must say both. A plan with an uncovered clause is sent back to you.
 ${clauseList(clauses).split('\n').map(l => `   ${l}`).join('\n')}
 ` : ''}${roleGuide(guide)}${feedback ? `\nThe approver sent this feedback on your previous plan. Address all of it:\n"""\n${feedback}\n"""\n` : ''}
+DevCrew checks plan.json (shape, coverage, architecture) as soon as you finish and sends any problem back to you, so do not write scripts or run commands to check it yourself.
 End with a short summary of the plan.`;
 }
 
