@@ -212,11 +212,11 @@ End with a short summary of what you changed.`;
 /** Any reviewer that can send work back: a gap against the requirement is never optional. */
 export const REQUIREMENT_RULE = 'Check every requirement clause against the code. Code that does not do what a clause says is a must-fix finding whatever its severity: answer "VERDICT: changes" for it and name the clause (R-n).';
 
-export function reviewerPrompt(baseCommit: string, requirement = '', clauses: Clause[] = []): string {
+export function reviewerPrompt(baseCommit: string, requirement = '', clauses: Clause[] = [], diff?: string): string {
   return `${header('reviewer')}
 You are the code reviewer. The tests already pass; your job is what tests cannot see.
 ${requirement ? `\n${sourceOfTruth(requirement, clauses)}${REQUIREMENT_RULE}\n` : ''}
-Review the changes with \`git diff ${baseCommit}\` against .devcrew/PRD.md, contracts/ and any ADRs in .devcrew/adr/.
+Review the changes${diff ? ' (the full diff is below; read other files only where you need more context)' : ` with \`git diff ${baseCommit}\``} against .devcrew/PRD.md, contracts/ and any ADRs in .devcrew/adr/, where they exist.${diff ? `\n\`\`\`diff\n${diff}\n\`\`\`` : ''}
 Look for: design problems, duplication, unclear names, missing error handling, security issues, and acceptance criteria that are tested only weakly.
 
 Write your review to .devcrew/review.md (the only file you may write). Its first line must be exactly
@@ -258,9 +258,11 @@ export function agentStepPrompt(step: AgentStep, opts: {
   /** Your notes when a gate sent the work back to this step. */
   gateFeedback?: string | null;
   clauses?: Clause[];
+  /** The changes so far, pasted for a step that reads "git diff" (none when too big to paste). */
+  diff?: string;
 }): string {
   if (step.instructions === 'builtin:reviewer') {
-    return reviewerPrompt(opts.baseCommit, opts.requirement, opts.clauses).replace(header('reviewer'), header(step.id, '-', opts.round));
+    return reviewerPrompt(opts.baseCommit, opts.requirement, opts.clauses, opts.diff).replace(header('reviewer'), header(step.id, '-', opts.round));
   }
   const reads = step.reads.map(r => (r === 'git diff' ? `- every change so far: \`git diff ${opts.baseCommit}\`` : `- ${r}`)).join('\n');
   const diagram = step.mayWrite.some(p => p === SYSTEM_DIAGRAM || (p.endsWith('/') && SYSTEM_DIAGRAM.startsWith(p)))

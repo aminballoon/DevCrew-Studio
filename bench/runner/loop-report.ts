@@ -19,13 +19,17 @@ const events = (runId: string): DevcrewEvent[] => {
 
 /** Minutes each role spent in agent turns, and Verify in running tests. */
 function minutesByRole(ev: DevcrewEvent[]): Record<string, number> {
+  // Per role, since the fast pipeline runs QA and the Builder at the same time
   const out: Record<string, number> = {};
-  let open: { role: string; ts: number } | undefined;
+  const open: Record<string, number> = {};
+  const close = (role: string, ts: number) => {
+    if (open[role] !== undefined) { out[role] = (out[role] ?? 0) + (ts - open[role]) / 60_000; delete open[role]; }
+  };
   for (const e of ev) {
-    if (e.type === 'agent_input') { open = { role: e.role, ts: e.ts }; }
-    if (e.type === 'usage' && open) { out[open.role] = (out[open.role] ?? 0) + (e.ts - open.ts) / 60_000; open = undefined; }
-    if (e.type === 'node_started' && e.node === 'verify') { open = { role: 'verify', ts: e.ts }; }
-    if (e.type === 'verify_result' && open?.role === 'verify') { out.verify = (out.verify ?? 0) + (e.ts - open.ts) / 60_000; open = undefined; }
+    if (e.type === 'agent_input') { open[e.role] = e.ts; }
+    if (e.type === 'usage') { close(e.role, e.ts); }
+    if (e.type === 'node_started' && e.node === 'verify') { open.verify = e.ts; }
+    if (e.type === 'verify_result') { close('verify', e.ts); }
   }
   return out;
 }

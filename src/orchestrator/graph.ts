@@ -150,6 +150,12 @@ function pasteFiles(workspace: string, prefixes: string[]): [string, string][] {
   return files.some(([, t]) => t.includes('\u0000')) || files.reduce((n, [, t]) => n + t.length, 0) > MAX_PASTED_CHARS ? [] : files;
 }
 
+/** The run's changes for a prompt, or nothing when they are too big to paste. */
+function pastedDiff(ws: Workspace): string | undefined {
+  const { patch } = diffSince(ws);
+  return patch && patch.length <= MAX_PASTED_CHARS ? patch : undefined;
+}
+
 const guideOf = (def: PipelineDef, type: 'planner' | 'qa' | 'build') => {
   const step = def.steps.find(x => x.type === type);
   return step && 'guideText' in step ? step.guideText : undefined;
@@ -508,6 +514,8 @@ const agentNode = (step: AgentStep, nextStep: Step | undefined) => node(step.id,
     feedback: sentBack ? s.reviews[step.id] ?? null : null,
     gateFeedback,
     clauses: requirementClauses(s.requirement),
+    // A reviewer read the repo with ~30 tool calls to find what changed (952k tokens on L-03); give it the diff
+    diff: step.reads.includes('git diff') ? pastedDiff(s.workspace!) : undefined,
   }));
   // One chance to fix a diagram the dashboard cannot draw
   const diagramProblems = step.mayWrite.some(p => p === SYSTEM_DIAGRAM || (p.endsWith('/') && SYSTEM_DIAGRAM.startsWith(p))) ? readSystem(s.workspace!.path).errors : [];
