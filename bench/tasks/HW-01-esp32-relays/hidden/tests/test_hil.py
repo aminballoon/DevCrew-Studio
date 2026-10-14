@@ -55,7 +55,7 @@ def reply(b, line):
 
 @pytest.fixture(scope='session')
 def board():
-    r = subprocess.run([f'{HOME}/venv/bin/pio', 'run', '-t', 'upload', '--upload-port', port()], cwd=WS, capture_output=True, text=True, timeout=900)
+    r = subprocess.run([f'{HOME}/venv/bin/pio', 'run', '-e', 'board', '-t', 'upload', '--upload-port', port()], cwd=WS, capture_output=True, text=True, timeout=900)
     assert r.returncode == 0, 'build or upload failed:\n' + (r.stdout + r.stderr)[-1500:]
     b = Board()
     b.boot_log = b.boot()
