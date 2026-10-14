@@ -37,6 +37,16 @@ const PLAN_SCHEMA = `{
   }
 }`;
 
+/**
+ * Files an earlier role wrote, pasted into the prompt. The agent would read them anyway, and every
+ * tool call re-reads the whole conversation: on L-02 QA and Dev spent 4-7 calls each just reading.
+ */
+export function filesBlock(files: [string, string][]): string {
+  return files.length
+    ? `\nTheir current content, so you do not need to read them again:\n${files.map(([path, text]) => `=== ${path} ===\n${text.trimEnd()}`).join('\n\n')}\n=== end of files ===\n`
+    : '';
+}
+
 /** A role guide on top of a built-in role's instructions: the specialist's techniques and tools. */
 const roleGuide = (text?: string) => (text ? `\nYour role guide. Follow it; it is how this team expects your role to work:\n"""\n${text}\n"""\n` : '');
 
@@ -76,10 +86,10 @@ ${clauseList(clauses).split('\n').map(l => `   ${l}`).join('\n')}
 End with a short summary of the plan.`;
 }
 
-export function qaPrompt(plan: Plan, earlier: string[] = [], requirement = '', clauses: Clause[] = [], guide?: string, opts: { blind?: boolean } = {}): string {
+export function qaPrompt(plan: Plan, earlier: string[] = [], requirement = '', clauses: Clause[] = [], guide?: string, opts: { blind?: boolean; files?: [string, string][] } = {}): string {
   return `${header('qa')}
-You are the QA engineer. Read .devcrew/PRD.md and contracts/. The developer has not written any code yet.
-${earlierReports(earlier)}
+You are the QA engineer. Work from .devcrew/PRD.md and contracts/. The developer has not written any code yet.
+${filesBlock(opts.files ?? [])}${earlierReports(earlier)}
 ${requirement ? `${sourceOfTruth(requirement, clauses)}${plan.coverage ? `The Planner mapped the clauses to acceptance criteria in .devcrew/plan.json ("coverage").\n` : ''}
 Write automated tests that check every requirement clause and every Acceptance Criterion against the contracts, for these modules:` : 'Write automated tests that check every Acceptance Criterion against the contracts, for these modules:'}
 ${plan.modules.map(m => `- ${m.id}: ${m.title}`).join('\n')}
@@ -120,7 +130,7 @@ const BLIND_QA = `Blind QA: the developer will not see most of your tests.
 - Under tests/<module>/ write only a small contract test (one to three tests): the module's exports exist and one basic call works. It shows the developer the shape of the API, not the rules.
 - Acceptance tests run with the test command, with tests/ replaced by acceptance/. Import code and shared helpers with paths that work from acceptance/<module>/.`;
 
-export function devPrompt(plan: Plan, module: PlanModule, attempt: number, last: VerifyResult | null, feedback: string | null, earlier: string[] = [], requirement = '', clauses: Clause[] = [], guide?: string, opts: { blind?: boolean } = {}): string {
+export function devPrompt(plan: Plan, module: PlanModule, attempt: number, last: VerifyResult | null, feedback: string | null, earlier: string[] = [], requirement = '', clauses: Clause[] = [], guide?: string, opts: { blind?: boolean; files?: [string, string][] } = {}): string {
   const failure = attempt > 1 && last && !last.passed
     ? `\nYour previous attempt did not pass verification:\n${last.reasons.map(r => `- ${r}`).join('\n')}\n\nTest output (tail):\n\`\`\`\n${last.output.slice(-4000)}\n\`\`\`\nFix the code. The tests are correct by definition here; do not try to change them.\n`
     : '';
@@ -128,7 +138,7 @@ export function devPrompt(plan: Plan, module: PlanModule, attempt: number, last:
 You are the Developer. Implement module "${module.id}": ${module.title}
 ${module.description}
 
-Read .devcrew/PRD.md, contracts/ and the tests in tests/${module.id}/ first.${opts.blind ? '\nMost of QA\'s tests are kept from you and run when your work is judged. Build what the requirement clauses and the PRD say, not only what tests/ shows. When a hidden test fails you see its name and failure message: fix the behaviour it names. You cannot read hidden tests and must not look for them. If you are sure a hidden test is wrong, start a line with "SPEC_ISSUE:" naming the test and why; QA will check it.' : ''}
+Work from .devcrew/PRD.md, contracts/ and the tests in tests/${module.id}/.${filesBlock(opts.files ?? [])}${opts.blind ? '\nMost of QA\'s tests are kept from you and run when your work is judged. Build what the requirement clauses and the PRD say, not only what tests/ shows. When a hidden test fails you see its name and failure message: fix the behaviour it names. You cannot read hidden tests and must not look for them. If you are sure a hidden test is wrong, start a line with "SPEC_ISSUE:" naming the test and why; QA will check it.' : ''}
 ${earlierReports(earlier)}${requirement ? `\n${sourceOfTruth(requirement, clauses)}Passing the tests is necessary but not enough: the code must also do everything the clauses for this module say.\n` : ''}
 Planned files for this module (stick to this architecture; mention any file you had to add and why):
 ${filesFor(plan, module.id, ['source', 'config']).map(f => `- ${f.path}: ${f.purpose}${f.exports.length ? ` Exports: ${f.exports.join(', ')}.` : ''}${f.dependsOn.length ? ` Uses: ${f.dependsOn.join(', ')}.` : ''}`).join('\n') || '- (none listed)'}

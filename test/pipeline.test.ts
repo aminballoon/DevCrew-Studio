@@ -39,6 +39,13 @@ test('scripted run goes through every stage, reverts the test tampering and loop
   assert.deepEqual(lastCommands?.type === 'verify_result' && lastCommands.commands, ['node --test']);
   assert.ok(events.some(e => e.type === 'usage' && e.role === 'dev' && e.totalTokens > 0));
 
+  // QA and Dev get the files they work from in the prompt; a retry does not repeat them
+  const prompts = events.flatMap(e => (e.type === 'agent_input' ? [{ role: e.role, prompt: e.prompt }] : []));
+  assert.match(prompts.find(p => p.role === 'qa')!.prompt, /=== \.devcrew\/PRD\.md ===[\s\S]*=== contracts\/cart\.d\.ts ===/);
+  const devPrompts = prompts.filter(p => p.role === 'dev').map(p => p.prompt);
+  assert.match(devPrompts[0], /=== tests\/cart-core\/cart\.test\.ts ===/);
+  assert.doesNotMatch(devPrompts[1], /=== tests\/cart-core/);
+
   // Every agent turn records what it was given and what it handed on
   const inputs = events.filter(e => e.type === 'agent_input');
   const outputs = events.filter(e => e.type === 'agent_output');

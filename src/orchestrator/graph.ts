@@ -6,6 +6,7 @@ import { Annotation, END, interrupt, START, StateGraph } from '@langchain/langgr
 import { runDir } from '../core/config';
 import { usageByRole, type GateId } from '../core/events';
 import { entryNode, loadPipeline, SYSTEM_DIAGRAM, type AgentStep, type GateStep, type PipelineDef, type Step } from '../pipeline/schema';
+import { takeSnapshot } from '../guard/snapshot';
 import { captureBaseline, countDeclaredTests, verify, type TestBaseline, type VerifyResult } from '../guard/verify';
 import { commitAll, diffSince, prepareWorkspace, type Workspace } from '../guard/workspace';
 import { readPlan, readText, type Plan } from './plan';
@@ -136,6 +137,17 @@ function showAcceptance(s: S): void {
 /** The same command run against acceptance/ instead of tests/; null when the command does not name tests/. */
 const acceptanceCommand = (command: string) => (command.includes('tests/') ? command.replaceAll('tests/', `${ACCEPTANCE}/`) : null);
 
+/** Text files under these paths, to paste into a prompt; none when together they are too big to paste. */
+const MAX_PASTED_CHARS = 80_000;
+function pasteFiles(workspace: string, prefixes: string[]): [string, string][] {
+  const files: [string, string][] = [];
+  for (const [path, buf] of takeSnapshot(workspace)) {
+    if (prefixes.some(p => path === p || (p.endsWith('/') && path.startsWith(p)))) { files.push([path, buf.toString('utf8')]); }
+  }
+  files.sort(([a], [b]) => prefixes.findIndex(p => a.startsWith(p)) - prefixes.findIndex(p => b.startsWith(p)) || a.localeCompare(b));
+  return files.some(([, t]) => t.includes('\u0000')) || files.reduce((n, [, t]) => n + t.length, 0) > MAX_PASTED_CHARS ? [] : files;
+}
+
 const guideOf = (def: PipelineDef, type: 'planner' | 'qa' | 'build') => {
   const step = def.steps.find(x => x.type === type);
   return step && 'guideText' in step ? step.guideText : undefined;
@@ -166,7 +178,7 @@ const qa = (def: PipelineDef) => node('qa', async s => {
   const earlier = reportPaths(def, def.steps.findIndex(x => x.type === 'qa'));
   const io = { from: ['You: the requirement', 'Planner: spec, contracts and module list'], reads: [...PLAN_FILES, ...earlier], to: ['Dev (build against them)', 'Verify (judge with them)'] };
   const blind = isBlind(def);
-  const turn = await agentTurn(ctx(s, 'qa', io), qaPrompt(s.plan!, earlier, s.requirement, requirementClauses(s.requirement), guideOf(def, 'qa'), { blind }));
+  const turn = await agentTurn(ctx(s, 'qa', io), qaPrompt(s.plan!, earlier, s.requirement, requirementClauses(s.requirement), guideOf(def, 'qa'), { blind, files: pasteFiles(s.workspace!.path, ['.devcrew/PRD.md', 'contracts/']) }));
   // QA reports broken tools instead of fixing them; surface each one where a person will see it
   for (const m of turn.text.matchAll(/^HARNESS_ISSUE:\s*(.+)$/gm)) {
     getBus().emit(s.runId, { type: 'log', level: 'warn', message: `QA found a problem outside the tests: ${m[1]}` });
@@ -239,7 +251,11 @@ const dev = (def: PipelineDef) => node('dev', async s => {
     to: ['Verify'],
   };
   // One developer session across modules: it already knows the PRD and contracts, and starts fresh once it grows past the limit
-  const turn = await agentTurn(ctx(s, 'dev', io), devPrompt(s.plan!, module, attempt, s.lastVerify, s.feedback, earlier, s.requirement, requirementClauses(s.requirement), guideOf(def, 'build'), { blind: isBlind(def) }));
+  const turn = await agentTurn(ctx(s, 'dev', io), devPrompt(s.plan!, module, attempt, s.lastVerify, s.feedback, earlier, s.requirement, requirementClauses(s.requirement), guideOf(def, 'build'), {
+    blind: isBlind(def),
+    // First attempt only: on a retry the session already holds them, or a fresh one reads what it needs
+    files: attempt === 1 ? pasteFiles(s.workspace!.path, ['.devcrew/PRD.md', 'contracts/', `tests/${module.id}/`]) : [],
+  }));
   const issue = turn.text.match(/^SPEC_ISSUE:\s*(.+)$/m)?.[1] ?? null;
   return {
     attempt,
