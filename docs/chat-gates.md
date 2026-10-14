@@ -20,7 +20,7 @@ To comment, type in the DM (or reply to a gate message when several runs wait). 
 2. https://discord.com/developers/applications → New Application → **Bot** → Reset Token, copy it. No privileged intents are needed.
 3. **Installation** (or OAuth2 → URL Generator): scope `bot`, permission Send Messages; open the link and add the bot to your server.
 4. Your user id: Discord Settings → Advanced → Developer Mode on; right-click your name → Copy User ID.
-5. `export DISCORD_BOT_TOKEN=...` in the shell that starts the dashboard, and in `devcrew.config.json`:
+5. Put `DISCORD_BOT_TOKEN=...` in `secrets.env` (git-ignored, see `secrets.env.example`; an exported variable also works), and in `devcrew.config.json`:
    ```json
    "notify": { "channels": [ { "type": "discord", "tokenEnv": "DISCORD_BOT_TOKEN", "userIds": ["<your user id>"] } ] }
    ```

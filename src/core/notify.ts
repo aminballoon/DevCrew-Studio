@@ -1,6 +1,7 @@
 import { createHmac } from 'node:crypto';
 
 import type { DevcrewConfig } from './config';
+import { secret } from './secrets';
 import { sendDiscord, type DiscordChannel } from './discord';
 import type { GateId } from './events';
 
@@ -90,12 +91,6 @@ function agentMessage(n: GateNotice): string {
     '',
     n.text,
   ].join('\n');
-}
-
-function secret(env: string): string {
-  const v = process.env[env];
-  if (!v) { throw new Error(`environment variable ${env} is not set`); }
-  return v;
 }
 
 export async function send(ch: NotifyChannel, n: GateNotice, payload: Record<string, unknown> = {}): Promise<void> {

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { gateReview } from './discordReview';
+import { secret } from './secrets';
 import type { GateNotice } from './notify';
 
 /**
@@ -32,11 +33,7 @@ const API = 'https://discord.com/api/v10';
 const SEP = '|';
 const INTENT_DIRECT_MESSAGES = 1 << 12;
 
-function token(ch: DiscordChannel): string {
-  const t = process.env[ch.tokenEnv];
-  if (!t) { throw new Error(`environment variable ${ch.tokenEnv} is not set`); }
-  return t;
-}
+const token = (ch: DiscordChannel) => secret(ch.tokenEnv);
 
 async function rest(tok: string, method: string, path: string, body?: unknown, files: { name: string; text: string }[] = []): Promise<any> {
   let init: RequestInit;
