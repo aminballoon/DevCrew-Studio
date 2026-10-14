@@ -4,6 +4,9 @@ import glob, os, subprocess, sys
 if os.environ.get('HIL_LOCKED') != '1':
     os.environ['HIL_LOCKED'] = '1'
     sys.exit(subprocess.call([os.path.expanduser('~/DevCrew-HIL/bin/hil-locked'), os.path.expanduser('~/DevCrew-HIL/venv/bin/python'), *sys.argv]))
+# This file is named serial.py: drop its own folder from the path so pyserial is imported, not this file.
+here = os.path.dirname(os.path.abspath(__file__))
+sys.path = [p for p in sys.path if os.path.abspath(p or '.') != here]
 import time, serial
 ports = glob.glob('/dev/cu.usbmodem*')
 if not ports: sys.exit('board not found on USB')

@@ -66,7 +66,8 @@ Write these files (and only files under .devcrew/ and contracts/):
 2. contracts/ — machine-checkable contracts the code must satisfy: exported function signatures as a .d.ts file, an OpenAPI file for HTTP APIs, or SQL migrations for databases. Use whichever fit.
 3. .devcrew/plan.json — exactly this shape:
 ${PLAN_SCHEMA}
-   Split the work into small modules that can be built and tested one at a time, in dependency order. Tests for module X will live in tests/X/.
+   Split the work into small modules that can be built and tested one at a time, in dependency order. Tests for module X will live in tests/X/; choose test file names and commands the project's test tool really finds there (PlatformIO, for example, only collects suite folders named test_*, so use tests/X/test_X/ with test_dir = tests and the filter X/*).
+   Contracts are read-only for the developer. In C or C++, do not put a class whose private members the developer must add in a contract header: use free functions, an abstract interface, or a class holding only a pointer to an implementation struct the developer defines in src/.
    Use the project's own language and test tool. DevCrew reads the results of node:test, jest, vitest, pytest, cargo test, ctest, GoogleTest, Unity, go test -v, any TAP output, and firmware "HIL:PASS/HIL:FAIL/HIL:DONE" lines; the test command must print one of them. Test cases are counted in tests/ by language: test()/it() in JS/TS, def test_ in Python, TEST()/RUN_TEST()/void test_ in C/C++, #[test] in Rust, func Test in *_test.go.
    The architecture must list EVERY file the run will create or change (contracts, source, tests, config), each with a clear purpose a non-programmer can follow. The approver reviews it as a diagram before any code is written, and files outside it will be flagged.
 ${clauses.length ? `   "coverage" maps EVERY requirement clause below to the acceptance criteria that cover it. Each clause must be covered in full, word for word: if a clause says two things (for example "is trimmed and must be 1 to 100 characters"), the criteria must say both. A plan with an uncovered clause is sent back to you.
@@ -94,12 +95,24 @@ Rules:
 - The suite will be run with: ${plan.testCommand}
 - Keep the suite lean: it is run on every attempt and maintained by every later change. Aim for about one test per acceptance criterion, and add boundary, hostile-input or concurrency cases only where a clause states a limit, an error or a security property. Prefer one test with several related assertions over many tiny tests, and reuse the helpers already in tests/.
 - When tests/ already has tests, they cover what the project does today. Write tests only for what this change adds or changes, and update the existing tests this change makes wrong. Do not rewrite or duplicate the others.
-- Every test must agree with the requirement and with every other test. Before finishing, run the suite once against the empty implementation and read each failure message to check that it fails for the reason you intend.
+- Every test must agree with the requirement and with every other test.
+${QA_SCOPE}
 
 ${opts.blind ? `${BLIND_QA}\n` : ''}${roleGuide(guide)}
 After you finish, these files are locked: the developer cannot change them.
 End with a list of the test files and which ACs ${requirement ? 'and requirement clauses ' : ''}each covers.`;
 }
+
+/**
+ * What QA's turn is for, and what it is not. Without this, QA turns took 15-33 min of a 60-min
+ * HW-01 run: on-board suites run against an empty firmware, reference models with mutants,
+ * and debugging of tools outside tests/.
+ */
+const QA_SCOPE = `Your job is writing the tests, not running the project. Keep your turn short:
+- Check your work with a quick run only: run the host-side tests once against the empty implementation, where they should fail to compile, fail to import or fail their assertions, and read the failures to check each test fails for the reason you intend. One run, a few minutes at most.
+- Do not run tests that need hardware, a board, a network service or a long wait, and do not flash or upload anything. Check those test files only for syntax (for example python -m py_compile). The Verify step runs them after the developer has built the code.
+- Do not write a reference implementation, mutants or a model of the code to test your tests, and do not write notes or memory files outside tests/.
+- If a tool, script or setting outside tests/ is broken or missing, do not investigate or fix it. Write the tests as if it worked, and add a line starting with "HARNESS_ISSUE:" to your final answer naming the file and the problem.`;
 
 /** Blind QA: the real tests are written for the judge, not for the developer. */
 const BLIND_QA = `Blind QA: the developer will not see most of your tests.

@@ -191,6 +191,7 @@ export class RunManager {
   private drive(runId: string, def: PipelineDef, input: unknown): void {
     const bus = getBus();
     const graph = this.graphFor(def);
+    const before = bus.read(runId).length;
     const job = (async () => {
       try {
         await graph.invoke(input as never, this.config(runId));
@@ -209,6 +210,8 @@ export class RunManager {
       } catch (e) {
         // The graph's finish step did not run, so the agents of earlier steps are still alive
         closeSessions(runId);
+        // Already ended from outside (a benchmark time limit cancels and records why): don't end it twice
+        if (bus.read(runId).slice(before).some(x => x.type === 'run_finished')) { this.finished.get(runId)?.('failed'); return; }
         bus.emit(runId, { type: 'log', level: 'error', message: (e as Error).stack ?? String(e) });
         bus.emit(runId, { type: 'run_finished', status: 'failed', error: (e as Error).message });
         this.finished.get(runId)?.('failed');

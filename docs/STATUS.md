@@ -1,6 +1,16 @@
 # สถานะโปรเจกต์
 
-อัปเดตล่าสุด: 2026-10-12
+อัปเดตล่าสุด: 2026-10-14
+
+## Latest changes (2026-10-14 evening, QA role: why the team lost HW-01)
+On HW-01 the single agent passed 9/9 in every v2 run; every team run got 0/9. QA was most of the reason: 15-33 min of the 60-min limit and 9-27M tokens (60-80% of the run).
+- **What QA spent the time on** (run 20261014-bcd0ff): running the on-board suite against an empty firmware (~20 min of serial timeouts), writing a reference model and ten mutants to test its own tests, debugging the board harness and esptool reset orderings, and writing memory notes. Dev then had about 20 min for three modules.
+- **QA instructions now say what the turn is for:** one quick host-side run against the empty implementation; never run hardware, network or long tests, never flash; no reference models, mutants or notes; a broken tool outside tests/ is reported with `HARNESS_ISSUE:` (shown as a warning in the run log) instead of fixed.
+- **Planner:** test files and commands must be ones the project's tool really finds (PlatformIO only collects `test_*` folders: `tests/X/test_X/`, `test_dir = tests`, filter `X/*`, checked with pio). C/C++ contracts must not declare a class whose private members Dev has to add (Dev cannot edit contracts/; that caused a dispute and a replan in bcd0ff).
+- **HW-01 seed bug:** `hil/serial.py` imported itself instead of pyserial (its own folder is first on the path), so the tool the requirement tells agents to use never worked, in every arm. Fixed. HIL results before this commit were made with the broken tool.
+- **Run end:** a run stopped by the benchmark time limit was recorded as finished twice ("Time limit" then "Run cancelled"); now once. An unattended run that runs out of fix attempts now says which module and why, instead of failing with no reason.
+- Already fixed earlier today, seen in the same runs: `spawnSync git ENOBUFS` (r2), pio output parsing and pio not on PATH (v1).
+- Not rerun yet. Tests: 54.
 
 ## Latest changes (2026-10-14, gates on your phone)
 - **Discord bot with buttons** (`"type": "discord"`): gates arrive as a DM with Approve/Revise/Abort buttons; Revise opens a feedback form; only listed user ids may answer. No AI and no cost. The dashboard keeps a Gateway websocket open for clicks (Node's built-in WebSocket, so Node 22+). Tried with a real bot: the DM with buttons arrives. The message now carries the review (plan: goal, modules, ACs, uncovered sentences + PRD.md; code: tests, files, cost, reviewer verdicts + changes.diff; escalation: reasons + test output), and text typed in the DM becomes a comment you send as Approve with note / Revise / Cancel (DIRECT_MESSAGES intent, not privileged).

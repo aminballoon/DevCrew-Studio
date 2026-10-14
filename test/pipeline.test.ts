@@ -99,6 +99,9 @@ test('trouble scenario: an unattended run that never passes ends as failed', { t
   assert.equal(events.filter(e => e.type === 'guard_violation').length, 5, 'the test edit is reverted on every attempt');
   const resolved = events.find(e => e.type === 'gate_resolved' && e.gate === 'escalation');
   assert.equal(resolved?.type === 'gate_resolved' && resolved.decision, 'abort');
+  const ends = events.filter(e => e.type === 'run_finished');
+  assert.equal(ends.length, 1);
+  assert.match(ends[0].type === 'run_finished' ? ends[0].error ?? '' : '', /still failing after 5 attempts: /, 'a failed run says why');
 });
 
 test('a security step sends the code back to Dev once, then the run continues', { timeout: 60_000 }, async () => {

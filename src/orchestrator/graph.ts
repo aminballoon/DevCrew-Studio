@@ -64,6 +64,8 @@ export const PipelineState = Annotation.Root({
   revisedTo: last<string | null>(() => null),
   decision: last<Decision | null>(() => null),
   status: last<RunStatus>(() => 'running'),
+  /** Why the run failed, for runs that end through the graph rather than by an exception. */
+  error: last<string | null>(() => null),
 });
 
 type S = typeof PipelineState.State;
@@ -164,7 +166,11 @@ const qa = (def: PipelineDef) => node('qa', async s => {
   const earlier = reportPaths(def, def.steps.findIndex(x => x.type === 'qa'));
   const io = { from: ['You: the requirement', 'Planner: spec, contracts and module list'], reads: [...PLAN_FILES, ...earlier], to: ['Dev (build against them)', 'Verify (judge with them)'] };
   const blind = isBlind(def);
-  await agentTurn(ctx(s, 'qa', io), qaPrompt(s.plan!, earlier, s.requirement, requirementClauses(s.requirement), guideOf(def, 'qa'), { blind }));
+  const turn = await agentTurn(ctx(s, 'qa', io), qaPrompt(s.plan!, earlier, s.requirement, requirementClauses(s.requirement), guideOf(def, 'qa'), { blind }));
+  // QA reports broken tools instead of fixing them; surface each one where a person will see it
+  for (const m of turn.text.matchAll(/^HARNESS_ISSUE:\s*(.+)$/gm)) {
+    getBus().emit(s.runId, { type: 'log', level: 'warn', message: `QA found a problem outside the tests: ${m[1]}` });
+  }
   if (countDeclaredTests(s.workspace!.path) === 0) {
     await agentTurn(ctx(s, 'qa', { ...io, from: ['System: no tests were found'] }), 'No test cases were found under tests/. Write the tests now.');
   }
@@ -334,7 +340,8 @@ const escalate = async (s: S): Promise<U> => {
   // Unattended (benchmark) runs have nobody to escalate to: out of attempts means failed
   if (s.autoApprove) {
     getBus().emit(s.runId, { type: 'gate_resolved', gate: 'escalation', decision: 'abort', feedback: 'Out of fix attempts (unattended run)' });
-    return { decision: 'abort', status: 'failed' };
+    const why = s.lastVerify?.reasons.join('; ') || 'tests still failing';
+    return { decision: 'abort', status: 'failed', error: `Module "${module.id}" still failing after ${s.attempt} attempts: ${why}` };
   }
   const answer = gate(s, 'escalation', {
     kind: 'escalation',
@@ -467,7 +474,7 @@ const setup = (def: PipelineDef) => async (s: S): Promise<U> => {
 
 const finish = async (s: S): Promise<U> => {
   closeSessions(s.runId);
-  getBus().emit(s.runId, { type: 'run_finished', status: s.status === 'running' ? 'completed' : s.status });
+  getBus().emit(s.runId, { type: 'run_finished', status: s.status === 'running' ? 'completed' : s.status, ...(s.status === 'failed' ? { error: s.error ?? 'unknown' } : {}) });
   return {};
 };
 
