@@ -12,7 +12,7 @@ export interface Workspace {
 }
 
 const git = (cwd: string, ...args: string[]) =>
-  execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 512 * 1024 * 1024 }).trim();
 
 /**
  * Whether the folder is the top of a git repository. A folder inside someone else's repository
