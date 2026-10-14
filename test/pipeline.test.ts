@@ -297,6 +297,36 @@ test('a session past the token limit starts fresh for its next full prompt, and 
   }
 });
 
+test('fast pipeline: QA and the Builder start together, the Builder fixes what the hidden tests catch', { timeout: 60_000 }, async () => {
+  const runs = new RunManager();
+  let workspace = '';
+  const builderSaw: boolean[] = [];
+  const unsubscribe = getBus().subscribe(e => {
+    if (e.type === 'run_started') { workspace = e.workspace; }
+    // Every time the Builder is given a turn, QA's tests must be out of its workspace
+    if (e.type === 'agent_input' && e.role === 'dev' && workspace) { builderSaw.push(existsSync(join(workspace, 'acceptance'))); }
+  });
+  const runId = runs.start({ requirement: readFileSync(join(TASK, 'requirement.md'), 'utf8'), source: join(TASK, 'seed'), profile: 'fake-fast', autoApprove: true, pipeline: 'fast' });
+  const status = await runs.waitFor(runId);
+  unsubscribe();
+  const events = getBus().read(runId);
+  assert.equal(status, 'approved', JSON.stringify(events.filter(e => e.type === 'log' || e.type === 'run_finished')).slice(0, 2000));
+  const stages = events.filter(e => e.type === 'node_started').map(e => e.type === 'node_started' && e.node);
+  assert.deepEqual(stages, ['qa', 'dev', 'verify', 'dev', 'verify', 'reviewer']);
+  // Both turns began before either finished
+  const inputs = events.filter(e => e.type === 'agent_input').slice(0, 2).map(e => e.type === 'agent_input' && e.role).sort();
+  assert.deepEqual(inputs, ['dev', 'qa']);
+  const firstUsage = events.findIndex(e => e.type === 'usage');
+  assert.ok(events.findIndex(e => e.type === 'agent_input' && e.role === 'dev') < firstUsage && events.findIndex(e => e.type === 'agent_input' && e.role === 'qa') < firstUsage);
+  assert.deepEqual(builderSaw, [false, false], 'the Builder never has the hidden tests in its workspace');
+  const verifies = events.flatMap(e => (e.type === 'verify_result' ? [e] : []));
+  assert.deepEqual(verifies.map(v => v.passed), [false, true]);
+  assert.ok(verifies[0].reasons.some(r => r.startsWith('Hidden tests:')), JSON.stringify(verifies[0].reasons));
+  assert.deepEqual(verifies[1].commands, ['node --test "tests/**/*.test.ts"', 'node --test "acceptance/**/*.test.ts"']);
+  // The approved commit keeps QA's tests with the code
+  assert.ok(existsSync(join(workspace, 'acceptance/discounts/discounts.test.ts')));
+});
+
 test('blind QA keeps the acceptance tests away from Dev and judges with them', { timeout: 60_000 }, async () => {
   const minimal = loadPipeline('minimal');
   const def: PipelineDef = { ...minimal, id: 'blind-test', steps: minimal.steps.map(s => (s.type === 'qa' ? { ...s, blind: true } : s)) };

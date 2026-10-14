@@ -4,7 +4,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { STUDIO_ROOT } from '../src/core/config';
-import { guidesOf, PIPELINES_DIR, validatePipeline, withGuides, type PipelineDef } from '../src/pipeline/schema';
+import { guidesOf, loadPipeline, PIPELINES_DIR, validatePipeline, withGuides, type PipelineDef } from '../src/pipeline/schema';
 
 const read = (id: string) => JSON.parse(readFileSync(join(STUDIO_ROOT, 'pipelines', `${id}.json`), 'utf8')) as PipelineDef;
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x));
@@ -175,4 +175,15 @@ test('built-in steps can add a role guide; a missing guide is a problem', () => 
   assert.match(qa.guideText ?? '', /^# Test engineer/);
   const missing = { ...withGuide, steps: withGuide.steps.map((s: { type: string }) => (s.type === 'qa' ? { ...s, guide: 'guide:no-such-guide' } : s)) };
   assert.match(validatePipeline(missing).join(' '), /no role guide pipelines\/roles\/no-such-guide\.md/);
+});
+
+test('a fast pipeline opens with a blind QA and the build, and has no planner', () => {
+  const fast = loadPipeline('fast');
+  assert.deepEqual(validatePipeline(fast), []);
+  const withPlanner = { ...fast, steps: [{ type: 'planner', id: 'planner' }, ...fast.steps] };
+  assert.ok(validatePipeline(withPlanner).some(e => /no "planner" step/.test(e)));
+  const seeing = { ...fast, steps: fast.steps.map(s => (s.type === 'qa' ? { ...s, blind: false } : s)) };
+  assert.ok(validatePipeline(seeing).some(e => /must be blind/.test(e)));
+  const swapped = { ...fast, steps: [fast.steps[1], fast.steps[0], ...fast.steps.slice(2)] };
+  assert.ok(validatePipeline(swapped).some(e => /starts with the "qa" step/.test(e)));
 });

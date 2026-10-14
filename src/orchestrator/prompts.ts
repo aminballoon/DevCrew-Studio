@@ -125,6 +125,63 @@ const QA_SCOPE = `Your job is writing the tests, not running the project. Keep y
 - Do not write a reference implementation, mutants or a model of the code to test your tests, and do not write notes or memory files outside tests/.
 - If a tool, script or setting outside tests/ is broken or missing, do not investigate or fix it. Write the tests as if it worked, and add a line starting with "HARNESS_ISSUE:" to your final answer naming the file and the problem. Leave the line out when nothing is broken.`;
 
+// --- Fast pipeline: one Builder, and a blind QA working at the same time ---
+
+/** Where the Builder says how to run its own tests, and QA how to run the hidden ones. */
+export const BUILDER_TESTS = '.devcrew/test.json';
+export const ACCEPTANCE_RUN = '.devcrew/acceptance.json';
+
+const runFile = (path: string, what: string) => `${path} with how to run ${what} from the project root, exactly this shape:
+   { "testCommand": "the command", "testFormats": ["optional: what it prints, from ${TEST_FORMATS.join(', ')}"] }
+   It must print results in one of those formats.`;
+
+export function builderPrompt(requirement: string, clauses: Clause[], guide?: string): string {
+  return `${header('dev', 'main', 1)}
+You are the Builder. You alone plan and write the code for this requirement, with your own tests.
+${sourceOfTruth(requirement, clauses)}
+A QA engineer is writing acceptance tests from the same requirement right now, without seeing your code. Your work is judged by those hidden tests and by yours. Use exactly the names, paths, signatures, errors and formats the requirement gives, because the hidden tests will.
+
+Do this:
+1. Look at the existing files, then implement everything the requirement asks, in the project's own language and conventions.
+2. Write tests in tests/ for the behaviour the requirement describes, with the project's own test tool, and run them until they pass. Keep them lean.
+3. Write ${runFile(BUILDER_TESTS, 'your tests')}
+${roleGuide(guide)}
+Do not write anything under acceptance/. If the requirement contradicts itself, follow the most specific clause and say which one in your summary.
+End with a short summary of what you built.`;
+}
+
+export function fastQaPrompt(requirement: string, clauses: Clause[], guide?: string): string {
+  return `${header('qa')}
+You are the QA engineer. A Builder is writing the code for this requirement right now; you write the acceptance tests that will judge it. The Builder never sees them, only the names and failure messages of the ones that fail.
+${sourceOfTruth(requirement, clauses)}
+Do this:
+1. Look at the existing files to learn the language, the test tool and any code there already.
+2. Write acceptance tests under acceptance/ (for example acceptance/main.test.ts) that check every clause, using exactly the names, paths and signatures the requirement gives. Import the code from where the requirement or the existing project says it lives. Where the requirement leaves a name open, test only behaviour you can reach through the names it does give.
+3. Name each test after the clause and the behaviour (R-n: what must happen), and give assertions clear messages: a failing name and message is all the Builder will see.
+4. Write ${runFile(ACCEPTANCE_RUN, 'only the acceptance tests')}
+
+Rules:
+- Only write under acceptance/ and ${ACCEPTANCE_RUN}. There is no code yet: check your tests only for syntax, do not wait for an implementation.
+- Keep the suite lean: about one test per clause, more only where a clause states a limit, an error or a security property.
+- Every test must agree with the requirement and with every other test.
+${roleGuide(guide)}
+End with the list of test files and the clauses each covers.`;
+}
+
+export function builderFixPrompt(attempt: number, last: VerifyResult | null, feedback: string | null): string {
+  return `${header('dev', 'main', attempt)}
+${!last || last.passed ? '' : `Your work did not pass verification:
+${last.reasons.map(r => `- ${r}`).join('\n')}
+
+Test output (tail; hidden acceptance tests show only their names and failure messages):
+\`\`\`
+${last.output.slice(-4000)}
+\`\`\`
+Fix the code so it does what the requirement says. You cannot see the hidden tests and must not look for them. If you are sure a hidden test contradicts the requirement, reply with a line starting with "SPEC_ISSUE:" naming the test and the clause; QA will check it.
+`}${feedback ? `\n${feedback}\n` : ''}
+Keep ${BUILDER_TESTS} up to date. End with a short summary of what you changed.`;
+}
+
 /** Blind QA: the real tests are written for the judge, not for the developer. */
 const BLIND_QA = `Blind QA: the developer will not see most of your tests.
 - Write the acceptance tests, the real check of every clause and criterion, under acceptance/<module>/ (for example acceptance/X/main.test.ts), mirroring the planned test files. They are taken away before the developer starts and only run when the work is judged. The developer then sees only the names and failure messages of failing tests, so name each test after the behaviour it checks (AC-n, R-n and what must happen), and give assertions clear messages.
@@ -238,7 +295,7 @@ ${issue}
 ${last ? `\nLast test run (tail):\n\`\`\`\n${last.output.slice(-3000)}\n\`\`\`\n` : ''}
 ${sourceOfTruth(requirement, clauses)}
 Check the disputed tests against the requirement clauses and against each other.
-- If a test is wrong, fix it (only files under tests/) so it checks what the clauses say. Keep the change small; do not rewrite other tests.
+- If a test is wrong, fix it (only files under tests/ or acceptance/) so it checks what the clauses say. Keep the change small; do not rewrite other tests.
 - If the tests are right, change nothing and explain in one or two sentences why, so the developer can make them pass.
 - If the requirement or the plan itself is contradictory, reply with a line starting with "PLAN_ISSUE:" explaining it; the Planner will revise the plan.
 End with one line starting with "QA_ANSWER:" that tells the developer what you decided.`;

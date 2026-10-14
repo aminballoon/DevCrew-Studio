@@ -241,10 +241,11 @@ const SINGLE_EDGES = [
 function pipelineLayout(def) {
   const nodes = [];
   let gateNo = 0;
+  const fast = def.kind === 'fast';
   for (const s of def.steps) {
     if (s.type === 'planner') nodes.push({ id: 'planner', label: 'Planner', role: 'PO + ARCHITECT', agentRole: 'planner' });
-    else if (s.type === 'qa') nodes.push({ id: 'qa', label: 'QA', role: 'TESTS FIRST', agentRole: 'qa' });
-    else if (s.type === 'build') nodes.push({ id: 'dev', label: 'Developer', role: 'PER MODULE', agentRole: 'dev' }, { id: 'verify', label: 'Verify', role: 'NO AI · JUDGE' });
+    else if (s.type === 'qa') nodes.push({ id: 'qa', label: 'QA', role: fast ? 'HIDDEN TESTS' : 'TESTS FIRST', agentRole: 'qa' });
+    else if (s.type === 'build') nodes.push({ id: 'dev', label: fast ? 'Builder' : 'Developer', role: fast ? 'SAME TIME AS QA' : 'PER MODULE', agentRole: 'dev' }, { id: 'verify', label: 'Verify', role: 'NO AI · JUDGE' });
     else if (s.type === 'gate') nodes.push({ id: s.id, label: `Gate ${++gateNo}`, gate: true, sub: { plan: 'Plan', code: 'Code', design: 'Design' }[s.review] });
     else nodes.push({
       id: s.id, label: s.name.length > 15 ? `${s.name.slice(0, 14)}…` : s.name, agentRole: s.id,
@@ -395,7 +396,8 @@ function update(first = false) {
   renderResume(m);
   // A design pipeline writes no code: no tests, modules or code architecture to show
   const design = DEF?.kind === 'design';
-  $('#arch-card').hidden = design;
+  // A fast run has no Planner, so no designed architecture to show
+  $('#arch-card').hidden = design || DEF?.kind === 'fast';
   $('#modules-card').hidden = design;
   $('#stats').innerHTML = [
     ['Time', `<span data-elapsed="${m.started}" data-ended="${m.endedAt ?? ''}">${fmtDur((m.endedAt ?? Date.now()) - m.started)}</span>`, ''],
@@ -763,15 +765,16 @@ function renderStory(m) {
           parts.length ? p(`The work split into <b>${parts.length} ${parts.length === 1 ? 'part' : 'parts'}</b>, built in this order:`) + `<ol class="plain-list">${parts.map(x => `<li>${esc(x.title)}</li>`).join('')}</ol>` : '',
           p('A precise description of how the pieces fit together, so everyone builds to the same shape.'),
         ].join('') : p('Nothing yet.'))];
+    const fast = DEF?.kind === 'fast';
     builtIn.qa = [
-      col('qa', 'QA', 'writes the checks first', status('qa') + p('The plan from the Planner.'),
+      col('qa', 'QA', fast ? 'writes hidden checks while the Builder builds' : 'writes the checks first', status('qa') + p(fast ? 'Your request, and nothing else.' : 'The plan from the Planner.'),
         checks ? p(`<b>${checks} automatic checks</b>, written before anything was built.`) + p('Nobody can change them afterwards, so they are a fair judge.') : p('Nothing yet.'))];
     builtIn.build = [
-      col('dev', 'Developer', 'builds it, one part at a time', status('dev') + p('The plan from the Planner.') + p('The checks from QA, to aim for.') + (failedRuns ? p('A report from the Checker each time something failed.') : ''),
+      col('dev', fast ? 'Builder' : 'Developer', fast ? 'plans and builds it, with its own checks' : 'builds it, one part at a time', status('dev') + (fast ? p('Your request.') : p('The plan from the Planner.') + p('The checks from QA, to aim for.')) + (failedRuns ? p(fast ? 'The names of the hidden checks that failed, each time something failed.' : 'A report from the Checker each time something failed.') : ''),
         m.modules.size ? `${codeLines ? p(`The working software: about <b>${codeLines} lines</b>.`) : ''}<ul class="plain-list">${devParts}</ul>` : p('Nothing yet.'),
         m.guards ? `<div class="plain-warn">Tried to change the checks ${m.guards === 1 ? 'once' : `${m.guards} times`} to make them easier to pass. The system undid it.</div>` : ''),
-      col('verify', 'Checker', 'the Verify box: the system, not an AI', status('verify') + p('The software from the Developer.') + p('The checks from QA.'),
-        runs.length ? p(`Ran the checks <b>${runs.length === 1 ? 'once' : `${runs.length} times`}</b>: ${runs.length - failedRuns} passed${failedRuns ? `, ${failedRuns} failed and went back to the Developer to fix` : ''}.`) : p('Nothing yet.'))];
+      col('verify', 'Checker', 'the Verify box: the system, not an AI', status('verify') + p(`The software from the ${fast ? 'Builder' : 'Developer'}.`) + p(fast ? "The Builder's own checks and QA's hidden ones." : 'The checks from QA.'),
+        runs.length ? p(`Ran the checks <b>${runs.length === 1 ? 'once' : `${runs.length} times`}</b>: ${runs.length - failedRuns} passed${failedRuns ? `, ${failedRuns} failed and went back to the ${fast ? 'Builder' : 'Developer'} to fix` : ''}.`) : p('Nothing yet.'))];
     // Every role in pipeline order; runs from before pipelines use the standard one
     const order = DEF?.steps ?? [{ type: 'planner' }, { type: 'qa' }, { type: 'build' }];
     cols = [you, ...order.flatMap(step => {
@@ -1436,7 +1439,7 @@ async function loadPipelines() {
 
 async function openNewRun(pipelineId) {
   const approved = (await loadPipelines()).filter(p => !p.draft && !p.errors.length);
-  $('#pipeline-select').innerHTML = approved.map(p => `<option value="${esc(p.id)}" ${p.id === (pipelineId ?? 'standard') ? 'selected' : ''}>${esc(p.def.name)}</option>`).join('');
+  $('#pipeline-select').innerHTML = approved.map(p => `<option value="${esc(p.id)}" ${p.id === (pipelineId ?? 'fast') ? 'selected' : ''}>${esc(p.def.name)}</option>`).join('');
   $('#pipeline-select').dispatchEvent(new Event('change'));
   $('#start-error').textContent = '';
   $('#new-run').showModal();

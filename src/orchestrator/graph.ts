@@ -6,11 +6,11 @@ import { Annotation, END, interrupt, START, StateGraph } from '@langchain/langgr
 import { runDir } from '../core/config';
 import { usageByRole, type GateId } from '../core/events';
 import { entryNode, loadPipeline, SYSTEM_DIAGRAM, type AgentStep, type GateStep, type PipelineDef, type Step } from '../pipeline/schema';
-import { takeSnapshot } from '../guard/snapshot';
+import { NOT_AUTHORED, takeSnapshot } from '../guard/snapshot';
 import { captureBaseline, countDeclaredTests, verify, type TestBaseline, type VerifyResult } from '../guard/verify';
 import { commitAll, diffSince, prepareWorkspace, type Workspace } from '../guard/workspace';
-import { readPlan, readText, type Plan } from './plan';
-import { agentStepPrompt, devPrompt, plannerPrompt, qaDisputePrompt, qaPrompt } from './prompts';
+import { readPlan, readTestRun, readText, type Plan, type TestRun } from './plan';
+import { ACCEPTANCE_RUN, agentStepPrompt, BUILDER_TESTS, builderFixPrompt, builderPrompt, devPrompt, fastQaPrompt, plannerPrompt, qaDisputePrompt, qaPrompt } from './prompts';
 import { requirementClauses } from './requirement';
 import { collectReports, reportPaths } from './reports';
 import { readSystem } from './system';
@@ -54,6 +54,8 @@ export const PipelineState = Annotation.Root({
   disputes: last<Record<string, number>>(() => ({})),
   /** Times the run went back to the Planner because the build could not go on. */
   replans: last<number>(() => 0),
+  /** Fast pipeline: how to run QA's hidden acceptance tests. */
+  acceptanceRun: last<TestRun | null>(() => null),
   /** Report text of each step with a verdict, by step id. */
   reviews: last<Record<string, string>>(() => ({})),
   /** How many times each step has sent the work back to Dev. */
@@ -219,7 +221,9 @@ const qaDispute = (def: PipelineDef) => node('qa', async s => {
   const io = { from: ['Dev: a test it says cannot be passed'], reads: [...PLAN_FILES, `tests/${module.id}/`], to: ['Dev (tries again)'] };
   const blind = isBlind(def);
   if (blind) { showAcceptance(s); }
-  const turn = await agentTurn(ctx(s, 'qa', io), qaDisputePrompt(module, s.specIssue ?? '', s.lastVerify, s.requirement, requirementClauses(s.requirement)));
+  // In a fast pipeline tests/ belongs to the Builder: QA only answers for its hidden tests
+  const scope = isFast(def) ? { write: [`${ACCEPTANCE}/`], deny: [] } : undefined;
+  const turn = await agentTurn({ ...ctx(s, 'qa', io), scope }, qaDisputePrompt(module, s.specIssue ?? '', s.lastVerify, s.requirement, requirementClauses(s.requirement)));
   if (blind) { hideAcceptance(s); }
   const disputes = { ...s.disputes, [module.id]: (s.disputes[module.id] ?? 0) + 1 };
   const planIssue = turn.text.match(/^PLAN_ISSUE:\s*(.+)$/m)?.[1];
@@ -328,20 +332,23 @@ const verifyNode = (def: PipelineDef) => node('verify', async s => {
   if (result.passed && !isLast) {
     return { lastVerify: result, moduleIndex: s.moduleIndex + 1, attempt: 0, feedback: null };
   }
-  // Blind QA: Dev cannot see a hidden test to argue with it. When the same tests fail twice in a
-  // row, QA checks them against the requirement before Dev tries again.
-  if (!result.passed && isBlind(def) && s.lastVerify && !s.lastVerify.passed && (s.disputes[module.id] ?? 0) < MAX_DISPUTES) {
-    const now = failingTests(result.output);
-    const before = failingTests(s.lastVerify.output);
-    if (now.length && now.length === before.length && now.every(t => before.includes(t))) {
-      return {
-        lastVerify: result, allModulesDone: false, feedback: null,
-        specIssue: `The same hidden test${now.length > 1 ? 's' : ''} failed on two attempts in a row, and the developer cannot see ${now.length > 1 ? 'them' : 'it'}: ${now.join('; ')}. The developer's last report:\n${s.lastDevReport ?? '(none)'}`,
-      };
-    }
-  }
+  const specIssue = isBlind(def) ? repeatedHiddenFailure(s, result) : null;
+  if (specIssue) { return { lastVerify: result, allModulesDone: false, feedback: null, specIssue }; }
   return { lastVerify: result, allModulesDone: result.passed && isLast, feedback: null };
 }, s => ({ module: s.plan!.modules[s.moduleIndex].id, attempt: s.attempt }));
+
+/**
+ * Blind QA: Dev cannot see a hidden test to argue with it. When the same tests fail twice in a
+ * row, QA checks them against the requirement before Dev tries again.
+ */
+function repeatedHiddenFailure(s: S, result: VerifyResult): string | null {
+  const module = s.plan!.modules[s.moduleIndex];
+  if (result.passed || !s.lastVerify || s.lastVerify.passed || (s.disputes[module.id] ?? 0) >= MAX_DISPUTES) { return null; }
+  const now = failingTests(result.output);
+  const before = failingTests(s.lastVerify.output);
+  if (!now.length || now.length !== before.length || !now.every(t => before.includes(t))) { return null; }
+  return `The same hidden test${now.length > 1 ? 's' : ''} failed on two attempts in a row, and the developer cannot see ${now.length > 1 ? 'them' : 'it'}: ${now.join('; ')}. The developer's last report:\n${s.lastDevReport ?? '(none)'}`;
+}
 
 /** How each supported test tool names a failing test, so the same failure can be spotted twice. */
 const FAILING_TEST = [
@@ -366,6 +373,100 @@ export function failingTests(output: string): string[] {
   }
   return [...names];
 }
+
+// --- Fast pipeline: the Builder and a blind QA start together; Verify judges with both test sets ---
+
+const isFast = (def: PipelineDef) => def.kind === 'fast';
+/** The Builder writes everything except QA's hidden tests. */
+const BUILDER_SCOPE = { write: ['*'], deny: [`${ACCEPTANCE}/`, ACCEPTANCE_RUN] };
+const FAST_QA_SCOPE = { write: [`${ACCEPTANCE}/`, ACCEPTANCE_RUN], deny: [] };
+const MAIN: Plan['modules'][number] = { id: 'main', title: 'Build', description: 'Everything the requirement asks for.' };
+
+/** The plan a fast run judges with: one module, and the Builder's own test command. */
+const fastPlan = (run: TestRun): Plan => ({ modules: [MAIN], architecture: [], ...run });
+
+/** Reads a test run file, giving the agent one follow-up turn to fix it. */
+async function testRunOf(turn: TurnContext, rel: string): Promise<TestRun> {
+  try { return readTestRun(turn.workspace, rel); } catch (e) {
+    await agentTurn({ ...turn, continues: true }, `${(e as Error).message}. Write ${rel} as asked: { "testCommand": "...", "testFormats": [...] }.`);
+    return readTestRun(turn.workspace, rel);
+  }
+}
+
+/**
+ * The Builder and QA work at the same time. QA works in its own copy of the project, so neither
+ * turn's scope guard sees the other's files, and its tests never enter the Builder's workspace.
+ */
+const fastWork = (def: PipelineDef) => node('qa', async s => {
+  const ws = s.workspace!.path;
+  const clauses = requirementClauses(s.requirement);
+  const copy = join(runDir(s.runId), 'qa-workspace');
+  rmSync(copy, { recursive: true, force: true });
+  cpSync(ws, copy, { recursive: true, filter: src => !NOT_AUTHORED.some(d => src.slice(ws.length).split(/[/\\]/).includes(d)) });
+
+  const builder: TurnContext = { ...ctx(s, 'dev', { from: ['You: the requirement'], reads: [], to: ['Verify'] }), scope: BUILDER_SCOPE };
+  const qa: TurnContext = { ...ctx(s, 'qa', { from: ['You: the requirement'], reads: [], to: ['Verify (judge with them)'] }), workspace: copy, scope: FAST_QA_SCOPE };
+  getBus().emit(s.runId, { type: 'node_started', node: 'dev', module: MAIN.id, attempt: 1 });
+  const [built] = await Promise.all([
+    agentTurn(builder, builderPrompt(s.requirement, clauses, guideOf(def, 'build'))).then(async turn => ({ turn, run: await testRunOf(builder, BUILDER_TESTS) })),
+    agentTurn(qa, fastQaPrompt(s.requirement, clauses, guideOf(def, 'qa'))).then(async () => {
+      if (countDeclaredTests(copy, `${ACCEPTANCE}/`) === 0) {
+        await agentTurn({ ...qa, continues: true }, `No test cases were found under ${ACCEPTANCE}/. Write the acceptance tests now.`);
+      }
+    }),
+  ]);
+  getBus().emit(s.runId, { type: 'node_finished', node: 'dev' });
+  const acceptanceRun = await testRunOf(qa, ACCEPTANCE_RUN);
+  // QA's tests go to the run's store, out of the Builder's reach; later QA turns work in the real workspace
+  rmSync(acceptanceStore(s), { recursive: true, force: true });
+  cpSync(join(copy, ACCEPTANCE), acceptanceStore(s), { recursive: true });
+  closeSessions(s.runId, 'qa');
+  if (countDeclaredTests(acceptanceStore(s), '') === 0) { throw new Error('QA wrote no acceptance tests'); }
+  return {
+    plan: fastPlan(built.run), acceptanceRun, baseline: captureBaseline(ws),
+    moduleIndex: 0, attempt: 1, allModulesDone: false, lastVerify: null, disputes: {},
+    lastDevReport: built.turn.text.trim().slice(-1500),
+  };
+});
+
+/** The Builder fixes what Verify, QA or a reviewer sent back, in the session that wrote the code. */
+const fastDev = node('dev', async s => {
+  const attempt = s.attempt + 1;
+  const turn: TurnContext = {
+    ...ctx(s, 'dev', { from: [...(s.lastVerify && !s.lastVerify.passed ? ['Verify: what failed'] : []), ...(s.feedback ? ['Feedback'] : [])], reads: [], to: ['Verify'] }),
+    scope: BUILDER_SCOPE,
+  };
+  const result = await agentTurn(turn, builderFixPrompt(attempt, s.lastVerify, s.feedback));
+  const issue = result.text.match(/^SPEC_ISSUE:\s*(.+)$/m)?.[1] ?? null;
+  return {
+    attempt, plan: fastPlan(await testRunOf(turn, BUILDER_TESTS)), specIssue: issue,
+    feedback: issue ? `The Builder reported a problem with a hidden test: ${issue}` : null,
+    lastDevReport: result.text.trim().slice(-1500),
+  };
+}, s => ({ module: MAIN.id, attempt: s.attempt + 1 }));
+
+/** Judges with the Builder's tests and QA's hidden ones; the Builder's own tests are not locked. */
+const fastVerify = node('verify', async s => {
+  const ws = s.workspace!.path;
+  const baseline = captureBaseline(ws);
+  const commands = [s.plan!.testCommand, s.acceptanceRun!.testCommand];
+  const own = await verify({ workspace: ws, testCommand: commands[0], baseline, expectedTests: countDeclaredTests(ws, 'tests/'), testFormats: s.plan!.testFormats });
+  showAcceptance(s);
+  let hidden: VerifyResult;
+  try {
+    hidden = await verify({ workspace: ws, testCommand: commands[1], baseline, expectedTests: countDeclaredTests(ws, `${ACCEPTANCE}/`), testFormats: s.acceptanceRun!.testFormats });
+  } finally {
+    hideAcceptance(s);
+  }
+  const result: VerifyResult = {
+    passed: own.passed && hidden.passed,
+    tests: hidden.tests,
+    reasons: [...own.reasons.map(r => `Your tests: ${r}`), ...hidden.reasons.map(r => `Hidden tests: ${r}`)],
+    output: `--- your tests ---\n${own.output.slice(-3000)}\n\n--- hidden acceptance tests ---\n${hidden.output}`,
+  };
+  getBus().emit(s.runId, { type: 'verify_result', module: MAIN.id, attempt: s.attempt, passed: result.passed, tests: result.tests, reasons: result.reasons, output: result.output.slice(-6000), commands });
+  return { lastVerify: result, allModulesDone: result.passed, feedback: null, specIssue: repeatedHiddenFailure(s, result) };
+}, s => ({ module: MAIN.id, attempt: s.attempt }));
 
 const escalate = async (s: S): Promise<U> => {
   const module = s.plan!.modules[s.moduleIndex];
@@ -528,9 +629,23 @@ export function buildGraph(def: PipelineDef = loadPipeline('standard')) {
   // Node names come from the file, so the graph is assembled without static typing
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const g: any = new StateGraph(PipelineState);
-  g.addNode('setup', setup(def)).addNode('finish', finish).addEdge(START, 'setup').addEdge('setup', entryNode(steps[0])).addEdge('finish', END);
+  g.addNode('setup', setup(def)).addNode('finish', finish).addEdge(START, 'setup').addEdge('finish', END);
+  if (!isFast(def)) { g.addEdge('setup', entryNode(steps[0])); }
+
+  if (isFast(def)) {
+    // QA and the Builder start together (one node); Verify judges with both; failures go back to the Builder
+    const after = nextNode('build');
+    g.addNode('qa', fastWork(def)).addEdge('setup', 'qa').addEdge('qa', 'verify')
+      .addNode('dev', fastDev).addNode('verify', fastVerify).addNode('dispute', qaDispute(def)).addNode('escalate', escalate)
+      .addConditionalEdges('dev', (s: S) => (!s.specIssue ? 'verify' : (s.disputes[MAIN.id] ?? 0) < MAX_DISPUTES ? 'dispute' : 'escalate'), ['verify', 'dispute', 'escalate'])
+      .addConditionalEdges('verify', (s: S) => (s.allModulesDone ? after : s.specIssue ? 'dispute' : s.attempt >= maxAttempts ? 'escalate' : 'dev'), [...new Set([after, 'dev', 'dispute', 'escalate'])])
+      // No Planner to send a plan problem to: a person decides
+      .addConditionalEdges('dispute', (s: S) => (s.specIssue ? 'escalate' : 'dev'), ['dev', 'escalate'])
+      .addConditionalEdges('escalate', (s: S) => (s.decision === 'retry' || s.decision === 'replan' ? 'dev' : 'finish'), ['dev', 'finish']);
+  }
 
   for (const step of steps) {
+    if (isFast(def) && (step.type === 'qa' || step.type === 'build')) { continue; }
     switch (step.type) {
       case 'planner':
         g.addNode('planner', planner(def)).addEdge('planner', nextNode('planner'));

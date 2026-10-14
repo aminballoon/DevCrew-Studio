@@ -26,6 +26,10 @@ npm run pipeline -- validate pipelines/drafts/<id>.json
 
 `kind` (optional): `"build"` (default) ends in committed code. `"design"` ends in approved
 documents and a system diagram, with no code: see [Design pipelines](#design-pipelines).
+`"fast"` has no Planner: it starts with a blind `qa` step and the `build` step, which run at the
+same time. One Builder plans and writes the code and its own tests; QA writes hidden acceptance
+tests from the requirement alone. Verify judges with both, failures go back to the Builder, and
+agent steps and the code gate follow as usual.
 
 ## Steps
 

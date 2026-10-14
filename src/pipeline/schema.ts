@@ -7,7 +7,9 @@ import { STUDIO_ROOT } from '../core/config';
  * A pipeline is an ordered list of steps. A "build" pipeline (the default) produces code:
  * the built-in steps (planner, qa, build) carry the guardrails and must appear exactly once,
  * with gates and agent steps around them. A "design" pipeline produces documents and a system
- * diagram only: agent steps and design gates, no code. See pipelines/SCHEMA.md.
+ * diagram only: agent steps and design gates, no code. A "fast" pipeline has no Planner: one
+ * Builder writes the code while a blind QA writes hidden tests from the requirement in parallel.
+ * See pipelines/SCHEMA.md.
  */
 export type Step = PlannerStep | QaStep | BuildStep | GateStep | AgentStep;
 
@@ -85,8 +87,11 @@ export interface PipelineDef {
   id: string;
   name: string;
   description: string;
-  /** "build" (default) ends in committed code; "design" ends in approved documents and a diagram. */
-  kind?: 'build' | 'design';
+  /**
+   * "build" (default) ends in committed code; "design" ends in approved documents and a diagram;
+   * "fast" ends in committed code built by one Builder, judged by tests it never sees.
+   */
+  kind?: 'build' | 'design' | 'fast';
   steps: Step[];
   /** Written on approval: the version of each role guide you approved, by name. */
   guideHashes?: Record<string, string>;
@@ -160,7 +165,7 @@ export function validatePipeline(raw: unknown): string[] {
 
   const index = (id: string) => steps.findIndex(s => s.id === id);
   const count = (type: Step['type']) => steps.filter(s => s?.type === type).length;
-  if (def.kind !== undefined && def.kind !== 'build' && def.kind !== 'design') { errors.push('"kind" must be "build" or "design".'); }
+  if (def.kind !== undefined && def.kind !== 'build' && def.kind !== 'design' && def.kind !== 'fast') { errors.push('"kind" must be "build", "design" or "fast".'); }
   const design = def.kind === 'design';
   const lastStep = steps[steps.length - 1];
   // Without a build step, "after build" means never
@@ -175,6 +180,18 @@ export function validatePipeline(raw: unknown): string[] {
       errors.push('The last step must be a gate with "review": "design", so you approve the design before it is committed.');
     }
     if (errors.length) { return errors; }
+  } else if (def.kind === 'fast') {
+    // The blind QA and the Builder start together, so they open the pipeline, in that order
+    if (count('planner')) { errors.push('A fast pipeline has no "planner" step: the Builder plans its own work.'); }
+    const [qa, build] = steps;
+    if (qa?.type !== 'qa' || build?.type !== 'build') { errors.push('A fast pipeline starts with the "qa" step and then the "build" step; they run at the same time.'); }
+    else if (qa.blind !== true) { errors.push('The "qa" step of a fast pipeline must be blind ("blind": true): the Builder never sees its tests.'); }
+    if (count('qa') !== 1 || count('build') !== 1) { errors.push('A fast pipeline has exactly one "qa" and one "build" step.'); }
+    if (lastStep.type !== 'gate' || lastStep.review !== 'code') {
+      errors.push('The last step must be a gate with "review": "code", so you approve the code before it is committed.');
+    }
+    if (errors.length) { return errors; }
+    iBuild = 1;
   } else {
     for (const type of ['planner', 'qa', 'build'] as const) {
       if (count(type) !== 1) { errors.push(`There must be exactly one "${type}" step (found ${count(type)}).`); }

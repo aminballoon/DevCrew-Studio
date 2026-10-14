@@ -1,0 +1,17 @@
+{
+  "id": "multi-fast",
+  "code": "F",
+  "name": "AI team · fast",
+  "summary": "One Builder plans and writes the code while a blind QA writes hidden tests from the requirement at the same time. The system runs both test sets; a reviewer reads only the diff.",
+  "agents": 3,
+  "steps": [
+    "Builder plans and codes, QA writes hidden tests (at the same time)",
+    "System runs both test sets → Builder fixes if failing (max 5 rounds)",
+    "Reviewer checks the diff"
+  ],
+  "role": "candidate",
+  "color": "#0ea5e9",
+  "mode": "pipeline",
+  "pipeline": "fast",
+  "profile": "claude"
+}

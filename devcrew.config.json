@@ -188,6 +188,15 @@
       "env": {
         "FAKE_SCRIPT": "agents/scripts/cart-blind-wrong.mjs"
       }
+    },
+    "fake-fast": {
+      "command": "node",
+      "args": [
+        "agents/fake-agent.mjs"
+      ],
+      "env": {
+        "FAKE_SCRIPT": "agents/scripts/cart-fast.mjs"
+      }
     }
   },
   "profiles": {
@@ -291,6 +300,13 @@
       "dev": "fake-blind-wrong",
       "reviewer": "fake-blind-wrong",
       "single": "fake-blind-wrong"
+    },
+    "fake-fast": {
+      "planner": "fake-fast",
+      "qa": "fake-fast",
+      "dev": "fake-fast",
+      "reviewer": "fake-fast",
+      "single": "fake-fast"
     }
   },
   "defaultProfile": "claude",
@@ -310,7 +326,8 @@
     "fake-conflict": "Harness test, no quota. Dev and QA keep blaming the plan; the run stops after two replans and asks for a human.",
     "fake-blind": "Harness test, no quota. Blind QA: Dev only sees a contract test; the real tests stay hidden until Verify.",
     "fake-blind-wrong": "Harness test, no quota. Blind QA with a wrong hidden test: it fails twice, goes back to QA, and QA fixes it.",
-    "claude-haiku": "Claude Haiku 5.5 for every role, isolated from your own Claude setup: the smaller, cheaper model."
+    "claude-haiku": "Claude Haiku 5.5 for every role, isolated from your own Claude setup: the smaller, cheaper model.",
+    "fake-fast": "Demo, no quota, for the fast pipeline. QA writes hidden tests while the Builder builds; the first build misses the discount codes and fixes them from the failing test names. Use project folder bench/tasks/S-01-cart/seed."
   },
   "$isolatedNote": "claude-isolated copies ANTHROPIC_BASE_URL and the model from ~/.claude/settings.json (it no longer reads that file). Update both here if you change them there.",
   "notify": {
