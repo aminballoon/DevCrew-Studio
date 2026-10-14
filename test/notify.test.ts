@@ -93,7 +93,12 @@ test('Discord buttons: only allowed users answer, revise asks for feedback, the 
   assert.equal(done.type, 7);
   assert.deepEqual(done.data.components, []);
 
-  const failing = await handleInteraction(click('42', 'devcrew|r1|approve'), ['42'], { ...host, resolve: async () => { throw new Error('Run is not waiting at a gate'); } }) as any;
+  // Approve also opens a form, with an optional note
+  const approveForm = await handleInteraction(click('42', 'devcrew|r1|approve'), ['42'], host) as any;
+  assert.equal(approveForm.type, 9);
+  assert.equal(approveForm.data.components[0].components[0].required, false);
+
+  const failing = await handleInteraction({ ...submit, data: { ...submit.data, custom_id: 'devcrew|r1|approve' } }, ['42'], { ...host, resolve: async () => { throw new Error('Run is not waiting at a gate'); } }) as any;
   assert.match(failing.data.content, /not waiting/);
 });
 

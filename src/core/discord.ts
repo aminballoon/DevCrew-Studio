@@ -134,13 +134,15 @@ export async function handleInteraction(i: any, allowed: string[], host: GateHos
     if (decision === 'cancel') { comments.delete(key); return { type: 7, data: { content: 'Comment not sent.', components: [] } }; }
     if (!c) { return ephemeral('This comment is no longer known (the dashboard restarted). Type it again.'); }
     ({ runId, text: feedback } = c);
-  } else if (i.type === 3 && decision === 'revise') {
-    // Revise needs feedback: ask for it in a form first
+  } else if (i.type === 3) {
+    // Every answer opens a form with a text box: an agent's question needs a typed answer, and a note can go with any decision
+    const needs = decision === 'revise';
+    const label = { revise: 'What should change?', approve: 'Note for the next step (optional)', retry: 'Hint for Dev (optional)', replan: 'What the Planner should change (optional)', abort: 'Why stop? (optional)' }[decision] ?? 'Note (optional)';
     return {
       type: 9,
       data: {
-        custom_id: i.data.custom_id, title: 'Revise',
-        components: [{ type: 1, components: [{ type: 4, custom_id: 'feedback', label: 'What should change?', style: 2, required: true, max_length: 2000 }] }],
+        custom_id: i.data.custom_id, title: LABELS[decision]?.label ?? decision,
+        components: [{ type: 1, components: [{ type: 4, custom_id: 'feedback', label, style: 2, required: needs, max_length: 2000 }] }],
       },
     };
   } else if (i.type === 5) {
