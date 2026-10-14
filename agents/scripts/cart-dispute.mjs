@@ -20,7 +20,9 @@ export default {
     ],
     'dev:cart-core': [
       {
-        thinking: 'Running the cart-core tests before writing code…\n\n',
+        // Like real agents: text, a tool call, then a new message with no newline in between
+        thinking: 'Running the cart-core tests before writing code…',
+        commands: ['node --test tests/cart-core'],
         message: 'SPEC_ISSUE: tests/cart-core/cart.test.ts expects a subtotal of 349, but AC-3 gives 599 for the same lines.',
       },
       fixed,

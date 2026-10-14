@@ -48,7 +48,7 @@ class FakeAgent {
     // Harness tests: a tool left running in the background, or the agent CLI dying mid-turn
     if (turn.background) { spawn('sh', ['-c', turn.background], { stdio: 'ignore' }); }
     if (turn.crash) { process.exit(1); }
-    await send({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: turn.thinking ?? 'Reading the workspace…\n\n' } });
+    await send({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: turn.thinking ?? 'Reading the workspace…' } });
     await delay(delayMs);
     let i = 0;
     for (const [rel, content] of Object.entries(turn.files ?? {})) {

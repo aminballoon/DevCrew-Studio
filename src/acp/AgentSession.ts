@@ -248,6 +248,10 @@ export class AgentSession {
         break;
       case 'tool_call':
         this.flushText();
+        // Text after a tool call is a new message: keep it on its own line, so markers the
+        // orchestrator looks for at a line start (SPEC_ISSUE:, QA_ANSWER:) are found. Without
+        // this, "...run the tests.SPEC_ISSUE: ..." cost an L-01 run four useless Dev attempts.
+        if (this.text && !this.text.endsWith('\n')) { this.text += '\n'; }
         this.emit({ type: 'tool_call', role: this.opts.role, toolCallId: u.toolCallId, title: u.title, kind: u.kind ?? undefined, status: u.status ?? undefined });
         break;
       case 'tool_call_update':
