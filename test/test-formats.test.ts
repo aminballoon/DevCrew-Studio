@@ -81,3 +81,9 @@ test('Verify judges a non-Node project from a real command: TAP from a shell scr
   const nothing = await verify({ workspace: ws, testCommand: 'echo build failed; exit 2', baseline });
   assert.match(nothing.reasons.join(), /No test results found in the output/);
 });
+
+test('reads the per-case lines of pio test as Unity results', () => {
+  const pio = 'Testing...\ntests/core/test_a.cpp:20: test_one\t[PASSED]\ntests/core/test_a.cpp:21: test_two\t[FAILED]\ntests/core/test_a.cpp:22: test_three\t[IGNORED]\ntests/core/test_a.cpp:23: test_four\t[PASSED]\n=== 4 test cases: 1 failed, 1 ignored, 2 succeeded in 00:00:01.2 ===\n';
+  assert.deepEqual(parseTestOutput(pio, ['unity', 'hil']), { tests: { total: 4, pass: 2, fail: 1, skipped: 1 }, format: 'unity' });
+  assert.deepEqual(parseTestOutput(pio), { tests: { total: 4, pass: 2, fail: 1, skipped: 1 }, format: 'unity' });
+});

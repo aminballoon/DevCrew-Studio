@@ -21,6 +21,7 @@ Write the firmware for a relay controller on the **Waveshare ESP32-S3-ETH-8DI-8R
 - Anything else → `ERR <reason>`. Lines longer than 64 characters are `ERR` too. The firmware must never crash or reset, whatever it is sent.
 
 ## Tools
+- PlatformIO is installed at `~/DevCrew-HIL/venv/bin/pio` (it is not on `PATH`). Its `native` platform can run host-side unit tests with `pio test -e <env>`.
 - `hil/flash.sh` builds and uploads the firmware.
 - `hil/serial.py <command> [...]` sends commands and prints the replies; `hil/serial.py --listen 10` prints what the board says for 10 seconds.
 - `BOARD.md` is the vendor's pin table for this board.

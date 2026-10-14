@@ -72,9 +72,15 @@ const PARSERS: Record<TestFormat, Parser> = {
     const total = ran.reduce((n, m) => n + num(m[1]), 0);
     return counts(sum(/^\[\s+PASSED\s+\] (\d+) tests?/gm), sum(/^\[\s+FAILED\s+\] (\d+) tests?, listed below/gm), sum(/^\[\s+SKIPPED\s+\] (\d+) tests?/gm), total);
   },
-  // 4 Tests 1 Failures 1 Ignored   (one line per test executable)
+  // 4 Tests 1 Failures 1 Ignored   (one line per test executable), or, from `pio test`, which
+  // runs Unity but prints one line per case: "test/x.cpp:12: test_a\t[PASSED]"
   unity: output => sumMatches(output, /^(\d+) Tests (\d+) Failures (\d+) Ignored/gm,
-    m => counts(num(m[1]) - num(m[2]) - num(m[3]), num(m[2]), num(m[3]), num(m[1]))),
+    m => counts(num(m[1]) - num(m[2]) - num(m[3]), num(m[2]), num(m[3]), num(m[1])))
+    ?? (() => {
+      const n = (word: string) => (output.match(new RegExp(`^\\S+:\\d+: \\S+\\s+\\[${word}\\]`, 'gm')) ?? []).length;
+      const pass = n('PASSED'), fail = n('FAILED'), skipped = n('IGNORED') + n('SKIPPED');
+      return pass + fail + skipped ? counts(pass, fail, skipped) : null;
+    })(),
   // go test -v: top-level "--- PASS: TestX" lines (subtests are indented and not counted)
   go: output => {
     const n = (word: string) => (output.match(new RegExp(`^--- ${word}: `, 'gm')) ?? []).length;
