@@ -29,7 +29,7 @@ const PLAN_SCHEMA = `{
         "path": "src/cart.ts",
         "kind": "contract | source | test | config | doc",
         "modules": ["module ids this file belongs to; empty if shared by all"],
-        "purpose": "One or two plain sentences: what this file is responsible for",
+        "purpose": "One plain sentence: what this file is responsible for",
         "exports": ["Names other files use: classes, functions, types, endpoints"],
         "dependsOn": ["paths of other planned files this one imports or implements"]
       }
@@ -62,11 +62,11 @@ ${earlierReports(earlier)}
 First look at the existing files in this workspace. If code already exists, write .devcrew/adr/0000-existing-architecture.md describing it before designing anything new.
 
 Write these files (and only files under .devcrew/ and contracts/):
-1. .devcrew/PRD.md — goal, scope, out of scope, user stories, and numbered Acceptance Criteria (AC-1, AC-2, ...) that are concrete and testable.
+1. .devcrew/PRD.md — goal, out of scope, and numbered Acceptance Criteria (AC-1, AC-2, ...) that are concrete and testable. Keep it short: one criterion per rule the requirement states, in the requirement's own words where possible; no user stories, no restating of the requirement, nothing the requirement does not ask for. Every word you write is read again by QA, the developer and the reviewers.
 2. contracts/ — machine-checkable contracts the code must satisfy: exported function signatures as a .d.ts file, an OpenAPI file for HTTP APIs, or SQL migrations for databases. Use whichever fit.
 3. .devcrew/plan.json — exactly this shape:
 ${PLAN_SCHEMA}
-   Split the work into small modules that can be built and tested one at a time, in dependency order. Tests for module X will live in tests/X/; choose test file names and commands the project's test tool really finds there (PlatformIO, for example, only collects suite folders named test_*, so use tests/X/test_X/ with test_dir = tests and the filter X/*).
+   Use as few modules as the work needs, in dependency order. Every module costs a separate build-and-test cycle, so one module is right for most requirements; split only parts that are large and can be tested on their own, and never more than 4. Tests for module X will live in tests/X/; choose test file names and commands the project's test tool really finds there (PlatformIO, for example, only collects suite folders named test_*, so use tests/X/test_X/ with test_dir = tests and the filter X/*).
    Contracts are read-only for the developer. In C or C++, do not put a class whose private members the developer must add in a contract header: use free functions, an abstract interface, or a class holding only a pointer to an implementation struct the developer defines in src/.
    Use the project's own language and test tool. DevCrew reads the results of node:test, jest, vitest, pytest, cargo test, ctest, GoogleTest, Unity, go test -v, any TAP output, and firmware "HIL:PASS/HIL:FAIL/HIL:DONE" lines; the test command must print one of them. Test cases are counted in tests/ by language: test()/it() in JS/TS, def test_ in Python, TEST()/RUN_TEST()/void test_ in C/C++, #[test] in Rust, func Test in *_test.go.
    The architecture must list EVERY file the run will create or change (contracts, source, tests, config), each with a clear purpose a non-programmer can follow. The approver reviews it as a diagram before any code is written, and files outside it will be flagged.
