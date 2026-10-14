@@ -156,7 +156,7 @@ ${ARCHITECTURE_SCHEMA}
 2. contracts/: the public interface of each module with an interface, in the project's language (a .d.ts file, Python Protocols or stubs, a header), using exactly the names, signatures, errors and formats the requirement gives. The Builder implements them and cannot change them.
 3. .devcrew/ARCHITECTURE.md, one page for the next developer: what each module does, how a request flows through them, each decision and its reason, and where the next likely changes go ("a new kind of X is a new file in Y"). If the requirement mentions later releases, design so they fit without restructuring, but do not build them.
 In C or C++, do not put a class whose private members the Builder must add in a contract header: use free functions, an abstract interface, or a pointer to an implementation struct defined in src/.
-${feedback ? `\nThe approver sent this feedback on your previous design. Address all of it:\n"""\n${feedback}\n"""\n` : ''}
+${feedback ? `\nA change to the design is asked for. Change it as little as the request needs, keep the earlier decisions unless the request overturns them, and add a decision (ADR) saying what changed and why:\n"""\n${feedback}\n"""\n` : ''}
 End with a short summary of the design.`;
 }
 

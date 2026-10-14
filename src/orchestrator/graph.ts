@@ -11,7 +11,7 @@ import { NOT_AUTHORED, takeSnapshot } from '../guard/snapshot';
 import { captureBaseline, countDeclaredTests, verify, type TestBaseline, type VerifyResult } from '../guard/verify';
 import { commitAll, diffSince, prepareWorkspace, type Workspace } from '../guard/workspace';
 import { readPlan, readTestRun, readText, type Plan, type TestRun } from './plan';
-import { ACCEPTANCE_RUN, agentStepPrompt, BUILDER_TESTS, builderFixPrompt, builderPrompt, devPrompt, fastQaPrompt, plannerPrompt, qaDisputePrompt, qaPrompt } from './prompts';
+import { ACCEPTANCE_RUN, agentStepPrompt, filesBlock, BUILDER_TESTS, builderFixPrompt, builderPrompt, devPrompt, fastQaPrompt, plannerPrompt, qaDisputePrompt, qaPrompt } from './prompts';
 import { requirementClauses } from './requirement';
 import { collectReports, reportPaths } from './reports';
 import { readSystem } from './system';
@@ -59,6 +59,8 @@ export const PipelineState = Annotation.Root({
   acceptanceRun: last<TestRun | null>(() => null),
   /** Fast pipeline: the Builder says the requirement does not fit the architecture; a person decides. */
   archChange: last<string | null>(() => null),
+  /** How many times the Architect changed the design for the Builder in this run. */
+  archChanges: last<number>(() => 0),
   /** Report text of each step with a verdict, by step id. */
   reviews: last<Record<string, string>>(() => ({})),
   /** How many times each step has sent the work back to Dev. */
@@ -417,6 +419,20 @@ const builderScope = (ws: string) => ({
 
 /** A Builder's answer that says the requirement needs another architecture. */
 const archChangeIn = (text: string) => text.match(/^ARCH_CHANGE:\s*(.+)$/m)?.[1] ?? null;
+
+/** At most this many architecture changes per run go to the Architect; more mean a person should look. */
+export const MAX_ARCH_CHANGES = 2;
+
+/** The fast pipeline's Architect step, when it has one. */
+const architectOf = (def: PipelineDef) => (def.steps[0]?.type === 'agent' && def.steps[0].instructions === 'builtin:architect' ? def.steps[0].id : null);
+
+/** What a Builder's answer hands on: an architecture change goes to the Architect as its feedback. */
+const builderAsks = (def: PipelineDef, s: S, text: string) => {
+  const archChange = archChangeIn(text);
+  return archChange && architectOf(def) && s.archChanges < MAX_ARCH_CHANGES
+    ? { archChange, feedback: `The Builder needs this change to the architecture to build the requirement: ${archChange}`, revisedTo: architectOf(def) }
+    : { archChange, revisedTo: null };
+};
 const FAST_QA_SCOPE = { write: [`${ACCEPTANCE}/`, ACCEPTANCE_RUN], deny: [] };
 const MAIN: Plan['modules'][number] = { id: 'main', title: 'Build', description: 'Everything the requirement asks for.' };
 
@@ -465,21 +481,26 @@ const fastWork = (def: PipelineDef) => node('qa', async s => {
   return {
     plan: fastPlan(built.run), acceptanceRun, baseline: captureBaseline(ws),
     moduleIndex: 0, attempt: 1, allModulesDone: false, lastVerify: null, disputes: {},
-    lastDevReport: built.turn.text.trim().slice(-1500), archChange: archChangeIn(built.turn.text),
+    lastDevReport: built.turn.text.trim().slice(-1500), ...builderAsks(def, s, built.turn.text),
   };
 });
 
 /** The Builder fixes what Verify, QA or a reviewer sent back, in the session that wrote the code. */
-const fastDev = node('dev', async s => {
+const fastDev = (def: PipelineDef) => node('dev', async s => {
   const attempt = s.attempt + 1;
   const turn: TurnContext = {
     ...ctx(s, 'dev', { from: [...(s.lastVerify && !s.lastVerify.passed ? ['Verify: what failed'] : []), ...(s.feedback ? ['Feedback'] : [])], reads: [], to: ['Verify'] }),
     scope: builderScope(s.workspace!.path),
   };
-  const result = await agentTurn(turn, builderFixPrompt(attempt, s.lastVerify, s.feedback));
+  // Back from the Architect: the design changed as asked, and the Builder carries on inside it
+  const changed = s.archChange
+    ? `The Architect changed the architecture for your request ("${s.archChange}"). Carry on inside the new version:${filesBlock(architectureFiles(s.workspace!.path))}`
+    : null;
+  const result = await agentTurn(turn, builderFixPrompt(attempt, s.lastVerify, [changed, s.feedback].filter(Boolean).join('\n\n') || null));
   const issue = result.text.match(/^SPEC_ISSUE:\s*(.+)$/m)?.[1] ?? null;
   return {
-    attempt, plan: fastPlan(await testRunOf(turn, BUILDER_TESTS)), specIssue: issue, archChange: archChangeIn(result.text),
+    attempt, plan: fastPlan(await testRunOf(turn, BUILDER_TESTS)), specIssue: issue, archChanges: s.archChanges + (changed ? 1 : 0),
+    ...builderAsks(def, { ...s, archChanges: s.archChanges + (changed ? 1 : 0) }, result.text),
     feedback: issue ? `The Builder reported a problem with a hidden test: ${issue}` : null,
     lastDevReport: result.text.trim().slice(-1500),
   };
@@ -697,11 +718,12 @@ export function buildGraph(def: PipelineDef = loadPipeline('standard')) {
     // QA and the Builder start together (one node); Verify judges with both; failures go back to the Builder
     const after = nextNode('build');
     // The Architect (and your approval of its design) only runs while the project has no architecture
-    const architect = steps[0].type === 'agent' ? steps[0].id : null;
+    const architect = architectOf(def);
     g.addConditionalEdges('setup', (s: S) => (architect && !existsSync(join(s.workspace!.path, ARCHITECTURE_FILE)) ? architect : 'qa'), architect ? [architect, 'qa'] : ['qa'])
-      .addNode('qa', fastWork(def)).addConditionalEdges('qa', (s: S) => (s.archChange ? 'escalate' : 'verify'), ['verify', 'escalate'])
-      .addNode('dev', fastDev).addNode('verify', fastVerify).addNode('dispute', qaDispute(def)).addNode('escalate', escalate)
-      .addConditionalEdges('dev', (s: S) => (s.archChange ? 'escalate' : !s.specIssue ? 'verify' : (s.disputes[MAIN.id] ?? 0) < MAX_DISPUTES ? 'dispute' : 'escalate'), ['verify', 'dispute', 'escalate'])
+      // A Builder that needs another architecture goes to the Architect (and your approval), or to you
+      .addNode('qa', fastWork(def)).addConditionalEdges('qa', (s: S) => (s.archChange ? (s.revisedTo ?? 'escalate') : 'verify'), ['verify', 'escalate', ...(architect ? [architect] : [])])
+      .addNode('dev', fastDev(def)).addNode('verify', fastVerify).addNode('dispute', qaDispute(def)).addNode('escalate', escalate)
+      .addConditionalEdges('dev', (s: S) => (s.archChange ? (s.revisedTo ?? 'escalate') : !s.specIssue ? 'verify' : (s.disputes[MAIN.id] ?? 0) < MAX_DISPUTES ? 'dispute' : 'escalate'), ['verify', 'dispute', 'escalate', ...(architect ? [architect] : [])])
       .addConditionalEdges('verify', (s: S) => (s.allModulesDone ? after : s.specIssue ? 'dispute' : s.attempt >= maxAttempts ? 'escalate' : 'dev'), [...new Set([after, 'dev', 'dispute', 'escalate'])])
       // No Planner to send a plan problem to: a person decides
       .addConditionalEdges('dispute', (s: S) => (s.specIssue ? 'escalate' : 'dev'), ['dev', 'escalate'])
@@ -742,10 +764,13 @@ export function buildGraph(def: PipelineDef = loadPipeline('standard')) {
         break;
       }
       case 'gate': {
+        // An architecture approved mid-build (the Builder asked for it) goes back to the Builder, not to a fresh start
+        const midBuild = isFast(def) && step.review === 'architecture';
         const after = nextNode(step.id);
         const back = entryNode(steps.find(x => x.id === step.reviseTo)!);
         g.addNode(step.id, gateNode(def, step))
-          .addConditionalEdges(step.id, (s: S) => (s.decision === 'approve' ? after : s.decision === 'revise' ? back : 'finish'), [...new Set([after, back, 'finish'])]);
+          .addConditionalEdges(step.id, (s: S) => (s.decision === 'approve' ? (midBuild && s.acceptanceRun ? 'dev' : after) : s.decision === 'revise' ? back : 'finish'),
+            [...new Set([after, back, 'finish', ...(midBuild ? ['dev'] : [])])]);
         break;
       }
       case 'agent': {

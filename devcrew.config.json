@@ -197,6 +197,15 @@
       "env": {
         "FAKE_SCRIPT": "agents/scripts/cart-fast.mjs"
       }
+    },
+    "fake-archchange": {
+      "command": "node",
+      "args": [
+        "agents/fake-agent.mjs"
+      ],
+      "env": {
+        "FAKE_SCRIPT": "agents/scripts/cart-fast-archchange.mjs"
+      }
     }
   },
   "profiles": {
@@ -309,6 +318,14 @@
       "reviewer": "fake-fast",
       "single": "fake-fast",
       "architect": "fake-fast"
+    },
+    "fake-archchange": {
+      "planner": "fake-archchange",
+      "qa": "fake-archchange",
+      "dev": "fake-archchange",
+      "reviewer": "fake-archchange",
+      "single": "fake-archchange",
+      "architect": "fake-archchange"
     }
   },
   "defaultProfile": "claude",
@@ -329,7 +346,8 @@
     "fake-blind": "Harness test, no quota. Blind QA: Dev only sees a contract test; the real tests stay hidden until Verify.",
     "fake-blind-wrong": "Harness test, no quota. Blind QA with a wrong hidden test: it fails twice, goes back to QA, and QA fixes it.",
     "claude-haiku": "Claude Haiku 5.5 for every role, isolated from your own Claude setup: the smaller, cheaper model. The Architect of a fast-arch pipeline uses Claude Sonnet 5.5: research finds stronger models design and maintain code better, and weak models gain most from a clear design.",
-    "fake-fast": "Demo, no quota, for the fast pipeline. QA writes hidden tests while the Builder builds; the first build misses the discount codes and fixes them from the failing test names. Use project folder bench/tasks/S-01-cart/seed."
+    "fake-fast": "Demo, no quota, for the fast pipeline. QA writes hidden tests while the Builder builds; the first build misses the discount codes and fixes them from the failing test names. Use project folder bench/tasks/S-01-cart/seed.",
+    "fake-archchange": "Harness test, no quota, for fast-arch. The Builder asks for an architecture change; the Architect changes the design, it is approved, and the Builder carries on."
   },
   "$isolatedNote": "claude-isolated copies ANTHROPIC_BASE_URL and the model from ~/.claude/settings.json (it no longer reads that file). Update both here if you change them there.",
   "notify": {

@@ -351,6 +351,20 @@ test('fast-arch: the Architect designs once, Verify enforces it, and the next ru
   assert.equal(getBus().read(second).flatMap(e => (e.type === 'node_started' ? [e.node] : []))[0], 'qa');
 });
 
+test('fast-arch: a Builder that needs another design gets it from the Architect and carries on', { timeout: 60_000 }, async () => {
+  const runs = new RunManager();
+  const runId = runs.start({ requirement: readFileSync(join(TASK, 'requirement.md'), 'utf8'), source: join(TASK, 'seed'), profile: 'fake-archchange', autoApprove: true, pipeline: 'fast-arch' });
+  assert.equal(await runs.waitFor(runId), 'approved', JSON.stringify(getBus().read(runId).filter(e => e.type === 'log' || e.type === 'run_finished')).slice(0, 2000));
+  const events = getBus().read(runId);
+  assert.deepEqual(events.flatMap(e => (e.type === 'node_started' ? [e.node] : [])), ['architect', 'qa', 'dev', 'architect', 'dev', 'verify', 'reviewer']);
+  const architectPrompts = events.flatMap(e => (e.type === 'agent_input' && e.role === 'architect' ? [e.prompt] : []));
+  assert.match(architectPrompts[1], /A change to the design is asked for[\s\S]*let util use the cart/);
+  const builderPrompts = events.flatMap(e => (e.type === 'agent_input' && e.role === 'dev' ? [e.prompt] : []));
+  assert.match(builderPrompts[1], /The Architect changed the architecture for your request[\s\S]*ADR-2/);
+  // The cart factory in util is legal under the new design
+  assert.deepEqual(events.flatMap(e => (e.type === 'verify_result' ? [e.passed] : [])), [true]);
+});
+
 test('blind QA keeps the acceptance tests away from Dev and judges with them', { timeout: 60_000 }, async () => {
   const minimal = loadPipeline('minimal');
   const def: PipelineDef = { ...minimal, id: 'blind-test', steps: minimal.steps.map(s => (s.type === 'qa' ? { ...s, blind: true } : s)) };

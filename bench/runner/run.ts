@@ -42,7 +42,9 @@ const USAGE = `Usage: npm run bench -- --tasks <id,...|all> --arms <id,...> [--r
 
   --profile  override every arm's agent profile (e.g. "fake" to test the harness for free)
   --suite    results folder under bench/results (default: date + profile)
-  --regrade  grade saved results again from their workspaces (after a grading fix); agents do not run`;
+  --regrade  grade saved results again from their workspaces (after a grading fix); agents do not run
+  --handoff-self  in handoff rounds each arm changes its own code, instead of the task's handoff arm
+  --rep      run only this repetition (to run the repetitions of an evolution suite in parallel processes)`;
 
 const { values } = parseArgs({
   options: {
@@ -52,6 +54,8 @@ const { values } = parseArgs({
     profile: { type: 'string' },
     suite: { type: 'string' },
     regrade: { type: 'boolean', default: false },
+    'handoff-self': { type: 'boolean', default: false },
+    rep: { type: 'string' },
     help: { type: 'boolean', default: false },
   },
 });
@@ -69,7 +73,8 @@ mkdirSync(outDir, { recursive: true });
 // Randomized order, so slow periods or a draining quota do not land on one arm. Evolution
 // rounds keep the task order given, since each round starts from the one before.
 const evolution = tasks.some(t => t.continues);
-const matrix = tasks.flatMap(task => arms.flatMap(arm => Array.from({ length: reps }, (_, i) => ({ task, arm, rep: i + 1 }))))
+const onlyRep = values.rep ? Number(values.rep) : null;
+const matrix = tasks.flatMap(task => arms.flatMap(arm => Array.from({ length: reps }, (_, i) => ({ task, arm, rep: i + 1 })).filter(r => !onlyRep || r.rep === onlyRep)))
   .map(x => ({ x, k: (evolution ? taskIds.indexOf(x.task.id) : 0) + Math.random() })).sort((a, b) => a.k - b.k).map(({ x }) => x);
 for (const t of tasks) {
   if (t.continues && !taskIds.includes(t.continues) && !existsSync(join(outDir, `${t.continues}__${arms[0].id}__r1.json`))) {
@@ -221,7 +226,8 @@ for (const [i, { task, arm, rep }] of matrix.entries()) {
   if (savedAndValid(file)) { console.log(`[${i + 1}/${matrix.length}] ${task.id} ${arm.id} #${rep}: already done`); continue; }
   let waitedMin = 0;
   // In a handoff round the code of `arm` is changed by the handoff arm; results stay under `arm`
-  const runner = task.handoffArm ? loadArm(task.handoffArm) : arm;
+  // With --handoff-self each arm keeps changing its own code (does its process keep the code easy to change?)
+  const runner = task.handoffArm && !values['handoff-self'] ? loadArm(task.handoffArm) : arm;
   retry: for (;;) {
     // Each task has its own script for the fake agent
     const profile = values.profile === 'fake' && task.fakeProfile ? task.fakeProfile : values.profile ?? runner.profile;
@@ -272,7 +278,7 @@ for (const [i, { task, arm, rep }] of matrix.entries()) {
       task: task.id, size: task.size, arm: arm.id, rep, profile, runId, status,
       resolved: g.resolved, hidden: g.hidden, regression: 'regression' in g ? g.regression : undefined, tests: g.tests,
       continues: task.continues,
-      ranAs: task.handoffArm,
+      ranAs: task.handoffArm ? runner.id : undefined,
       ...m,
       perf: p,
       quotaLimited: quota ?? undefined,
