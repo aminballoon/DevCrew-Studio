@@ -2,6 +2,19 @@
 
 อัปเดตล่าสุด: 2026-10-14
 
+## Latest changes (2026-10-14 night, tuning loop on Claude Haiku)
+Loop: run S-01, L-01, L-02, L-03 (82 hidden tests per arm) for the team (`multi-minimal`) and the single agent, read `npx tsx bench/runner/loop-report.ts <suite>`, fix the biggest waste, run again. Suites `loop-i0`, `loop-i1`, `loop-i2`.
+
+| Round | Change | Team hidden | Team tokens/task | Team min/task | Single |
+|---|---|---|---|---|---|
+| i0 | before | 66/82 | 8.0M | 16.5 | 82/82, 0.86M, 2.0 min |
+| i1 | Planner: few modules (L-02 went from 10 modules / 31 files to 1 / 11), short PRD | 82/82 | 2.2M | 7.6 | |
+| i2 | QA and Dev get PRD/contracts/tests in the prompt; `timeout` shim; Planner skips the ADR on empty projects and its own plan checks | 82/82 | 1.5M | 6.4 | 82/82, 0.68M, 2.1 min |
+
+Found and fixed along the way: SPEC_ISSUE/QA_ANSWER after a tool call was glued to the previous message's text and not found (L-01 wasted four Dev attempts); `timeout` missing on macOS (10 of 172 runs); `HARNESS_ISSUE: none` logged as a warning. Usage events now record model calls and thinking characters (the adapter sends no thinking, so the 1.5-3 min silences per role are long generations).
+One run per task per round, so single numbers move with noise (L-02 i2 had two disputes, i1 none).
+Still about 2x the tokens and 3x the time of the single agent: every role starts a fresh session, reads the last role's documents and plans again. Web research (Cognition, Anthropic, AgentCoder, "Do More Agents Help?") agrees: what works is one writer plus independent checks (blind tests, a clean-context diff reviewer), in parallel where possible. Proposed next: a "fast" pipeline, Builder and blind QA in parallel, then Verify and a diff reviewer.
+
 ## Latest changes (2026-10-14 evening, QA role: why the team lost HW-01)
 On HW-01 the single agent passed 9/9 in every v2 run; every team run got 0/9. QA was most of the reason: 15-33 min of the 60-min limit and 9-27M tokens (60-80% of the run).
 - **What QA spent the time on** (run 20261014-bcd0ff): running the on-board suite against an empty firmware (~20 min of serial timeouts), writing a reference model and ten mutants to test its own tests, debugging the board harness and esptool reset orderings, and writing memory notes. Dev then had about 20 min for three modules.

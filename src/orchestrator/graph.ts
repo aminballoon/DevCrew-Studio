@@ -180,7 +180,7 @@ const qa = (def: PipelineDef) => node('qa', async s => {
   const blind = isBlind(def);
   const turn = await agentTurn(ctx(s, 'qa', io), qaPrompt(s.plan!, earlier, s.requirement, requirementClauses(s.requirement), guideOf(def, 'qa'), { blind, files: pasteFiles(s.workspace!.path, ['.devcrew/PRD.md', 'contracts/']) }));
   // QA reports broken tools instead of fixing them; surface each one where a person will see it
-  for (const m of turn.text.matchAll(/^HARNESS_ISSUE:\s*(.+)$/gm)) {
+  for (const m of turn.text.matchAll(/^HARNESS_ISSUE:\s*(?!none\b)(.+)$/gim)) {
     getBus().emit(s.runId, { type: 'log', level: 'warn', message: `QA found a problem outside the tests: ${m[1]}` });
   }
   if (countDeclaredTests(s.workspace!.path) === 0) {

@@ -123,7 +123,7 @@ const QA_SCOPE = `Your job is writing the tests, not running the project. Keep y
 - Check your work with a quick run only: run the host-side tests once against the empty implementation, where they should fail to compile, fail to import or fail their assertions, and read the failures to check each test fails for the reason you intend. One run, a few minutes at most.
 - Do not run tests that need hardware, a board, a network service or a long wait, and do not flash or upload anything. Check those test files only for syntax (for example python -m py_compile). The Verify step runs them after the developer has built the code.
 - Do not write a reference implementation, mutants or a model of the code to test your tests, and do not write notes or memory files outside tests/.
-- If a tool, script or setting outside tests/ is broken or missing, do not investigate or fix it. Write the tests as if it worked, and add a line starting with "HARNESS_ISSUE:" to your final answer naming the file and the problem.`;
+- If a tool, script or setting outside tests/ is broken or missing, do not investigate or fix it. Write the tests as if it worked, and add a line starting with "HARNESS_ISSUE:" to your final answer naming the file and the problem. Leave the line out when nothing is broken.`;
 
 /** Blind QA: the real tests are written for the judge, not for the developer. */
 const BLIND_QA = `Blind QA: the developer will not see most of your tests.
