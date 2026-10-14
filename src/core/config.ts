@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Role } from './events';
+import type { NotifyConfig } from './notify';
 
 export interface AgentSpec {
   command: string;
@@ -22,6 +23,8 @@ export interface DevcrewConfig {
   profileNotes?: Record<string, string>;
   maxFixAttempts: number;
   turnTimeoutMinutes: number;
+  /** Chat agents (OpenClaw, Hermes) that bring gate questions to your phone. */
+  notify?: NotifyConfig;
 }
 
 /** Repository root of DevCrew Studio itself (config, agents/, bench/). */

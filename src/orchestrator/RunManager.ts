@@ -5,6 +5,7 @@ import { Command } from '@langchain/langgraph';
 import { SqliteSaver } from '@langchain/langgraph-checkpoint-sqlite';
 
 import { DATA_ROOT, runDir } from '../core/config';
+import { gateDecisions, notifyGate } from '../core/notify';
 import { usageByRole, type DevcrewEvent, type GateId } from '../core/events';
 import { loadPipeline, validatePipeline, withGuides, type PipelineDef } from '../pipeline/schema';
 import { buildGraph, type GateAnswer } from './graph';
@@ -61,6 +62,31 @@ export class RunManager {
     return g;
   }
 
+  private requirementOf(runId: string): string {
+    const started = getBus().read(runId).find(e => e.type === 'run_started');
+    return started?.type === 'run_started' ? started.requirement : '';
+  }
+
+  /**
+   * The gate a run waits at, in plain text for a chat agent: what is asked, what was found,
+   * and which answers it takes. Null when the run is not waiting.
+   */
+  waitingGateText(runId: string): string | null {
+    const events = getBus().read(runId);
+    const lastWait = events.findLastIndex(e => e.type === 'gate_waiting');
+    if (lastWait < 0 || events.slice(lastWait).some(e => e.type === 'gate_resolved' || e.type === 'run_finished')) { return null; }
+    const e = events[lastWait] as Extract<DevcrewEvent, { type: 'gate_waiting' }>;
+    const p = e.payload;
+    const lines = [`Run ${runId} waits at: ${String(p.title ?? e.gate)}`, `Requirement:\n${this.requirementOf(runId)}`];
+    for (const [k, v] of Object.entries(p)) {
+      if (['title', 'kind'].includes(k) || v == null || v === '') { continue; }
+      const text = typeof v === 'string' ? v : JSON.stringify(v, null, 1);
+      lines.push(`${k}:\n${text.length > 3000 ? `${text.slice(0, 3000)}\n... (shortened, see the dashboard)` : text}`);
+    }
+    lines.push(`Answers: ${gateDecisions(p).join(', ')}`);
+    return lines.join('\n\n');
+  }
+
   /** The pipeline a run was started with; runs from before pipelines existed used the standard one. */
   private pipelineOf(runId: string): PipelineDef {
     const started = getBus().read(runId).find(e => e.type === 'run_started');
@@ -91,7 +117,10 @@ export class RunManager {
     await this.active.get(runId);
     const def = this.pipelineOf(runId);
     const state = await this.graphFor(def).getState(this.config(runId));
-    if (!state.tasks.some(t => t.interrupts.length)) { throw new Error('Run is not waiting at a gate'); }
+    const waiting = state.tasks.flatMap(t => t.interrupts)[0];
+    if (!waiting) { throw new Error('Run is not waiting at a gate'); }
+    const allowed = gateDecisions(waiting.value as Record<string, unknown>);
+    if (!allowed.includes(answer.decision)) { throw new Error(`This gate takes ${allowed.join(', ')}, not "${answer.decision}"`); }
     this.drive(runId, def, new Command({ resume: answer }));
   }
 
@@ -161,6 +190,10 @@ export class RunManager {
         const waiting = state.tasks.flatMap(t => t.interrupts)[0];
         if (waiting) {
           const { gate, ...payload } = waiting.value as { gate: GateId } & Record<string, unknown>;
+          // Before gate_waiting: the CLI exits on that event, and the question must reach your phone first
+          for (const message of await notifyGate(getConfig(), runId, gate, payload, this.requirementOf(runId))) {
+            bus.emit(runId, { type: 'log', level: 'warn', message });
+          }
           bus.emit(runId, { type: 'gate_waiting', gate, payload });
         } else {
           this.finished.get(runId)?.(state.values.status);

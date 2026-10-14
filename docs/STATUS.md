@@ -2,6 +2,12 @@
 
 อัปเดตล่าสุด: 2026-10-12
 
+## Latest changes (2026-10-14, gates on your phone)
+- A run waiting at a gate can send the question to a chat agent: OpenClaw (`/hooks/agent`, bearer token), Hermes Agent (webhook route, Generic V2 HMAC) or any webhook. The agent forwards it to Telegram/WhatsApp/etc.; your reply ("approve", "revise: ...", "abort") is turned into a call to the gate API. Config `notify` in `devcrew.config.json`, secrets by env var name. Setup: `docs/chat-gates.md`; skill for the agent: `integrations/devcrew-gates/SKILL.md`.
+- New `GET /api/runs/<id>/gate.txt` (the waiting gate as plain text). The gate API now refuses a decision the gate does not take (e.g. `retry` at a plan gate).
+- A failing channel is logged and never stops the run. Not yet tried against a live OpenClaw or Hermes install.
+- Tests: 51 (`test/notify.test.ts`).
+
 ## Latest changes (2026-10-13, morning: more harness fixes found while the suites ran)
 - **node_modules was replaced by a symlink on merge:** a worktree's `node_modules` symlink had been committed (`.gitignore` said `node_modules/`, which matches folders only). The merge into main deleted the real folder; the post-v1 runs failed at once. Untracked it, `.gitignore` now says `node_modules`, reinstalled with `npm ci`. No results were lost.
 - **agy turns were capped at 60 min by the adapter:** `google-antigravity-acp` always passes `--print-timeout=60m`. The rerun of arm A on L-04 stopped at exactly 60 min with unfinished code (hidden 0/0, compile errors). `agents/agy-no-print-timeout.sh` now starts agy with `--print-timeout=0`; DevCrew's own turn and task limits apply. Team runs were not affected (DevCrew cuts their turns at 30 min). Arm A on L-04 needs another rerun.

@@ -72,6 +72,13 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   const path = url.pathname;
   const runMatch = path.match(/^\/api\/runs\/([\w-]+)(\/gate)?$/);
   const resumeMatch = path.match(/^\/api\/runs\/([\w-]+)\/resume$/);
+  const gateText = path.match(/^\/api\/runs\/([\w-]+)\/gate\.txt$/);
+  if (gateText && req.method === 'GET') {
+    const text = runs.waitingGateText(gateText[1]);
+    res.writeHead(text ? 200 : 404, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end(text ?? 'This run is not waiting at a gate.');
+    return;
+  }
   if (resumeMatch && req.method === 'GET') { return json(res, 200, await runs.resumeInfo(resumeMatch[1])); }
   if (resumeMatch && req.method === 'POST') {
     try {
