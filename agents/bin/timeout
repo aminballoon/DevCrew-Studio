@@ -1,0 +1,21 @@
+#!/bin/sh
+# GNU-style `timeout DURATION COMMAND...` for machines without it (macOS). Agents reach for it
+# often; without it their test runs failed with exit 127 and they spent turns working around it.
+# DevCrew puts this folder at the end of PATH, so a real timeout wins when one is installed.
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -s|-k|--signal|--kill-after) shift 2 ;;
+    -*) shift ;;
+    *) break ;;
+  esac
+done
+d=$1; shift
+case $d in
+  *s) d=${d%s} ;;
+  *m) d=$(( ${d%m} * 60 )) ;;
+  *h) d=$(( ${d%h} * 3600 )) ;;
+esac
+d=${d%.*}; [ "${d:-0}" -gt 0 ] 2>/dev/null || d=1
+exec perl -e 'my $t = shift; my $pid = fork; if (!$pid) { exec @ARGV or exit 127 }
+  $SIG{ALRM} = sub { kill "TERM", $pid; sleep 1; kill "KILL", $pid; exit 124 };
+  alarm $t; waitpid($pid, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' "$d" "$@"
