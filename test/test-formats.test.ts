@@ -96,3 +96,25 @@ test('failing test names are read from every tool, so blind QA spots the same fa
   assert.deepEqual(failingTests('HIL:FAIL board/test_b.py::test_ack: expected ACK\nHIL:DONE\n'), ['board/test_b.py::test_ack']);
   assert.deepEqual(failingTests('test frames::crc ... FAILED\n--- FAIL: TestX (0.00s)\nnot ok 2 - rejects\n'), ['frames::crc', 'TestX', 'rejects']);
 });
+
+test('node TAP with suites counts the tests inside them, not the describe blocks', () => {
+  const tap = [
+    'TAP version 13',
+    '# Subtest: bookings',
+    '    # Subtest: R-1: a booking is created',
+    '    ok 1 - R-1: a booking is created',
+    '    # Subtest: R-2: overlaps are refused',
+    '    not ok 2 - R-2: overlaps are refused',
+    '    1..2',
+    'not ok 1 - bookings',
+    '# Subtest: rooms',
+    '    ok 1 - R-3: rooms are listed # SKIP',
+    '    1..1',
+    'ok 2 - rooms',
+    '1..2',
+    '# tests 3', '# suites 2', '# pass 1', '# fail 1', '# cancelled 0', '# skipped 1', '# todo 0',
+  ].join('\n');
+  assert.deepEqual(parseTestOutput(tap, ['tap']).tests, { total: 3, pass: 1, fail: 1, skipped: 1 });
+  // Any other TAP producer is still counted line by line
+  assert.deepEqual(parseTestOutput('1..3\nok 1 - a\nnot ok 2 - b\nok 3 - c # SKIP\n', ['tap']).tests, { total: 3, pass: 1, fail: 1, skipped: 1 });
+});

@@ -97,6 +97,15 @@ const PARSERS: Record<TestFormat, Parser> = {
   // Any TAP producer: "1..4", "ok 1 - x", "not ok 2 - y", "ok 3 # SKIP"
   tap: output => {
     if (!/^1\.\.\d+/m.test(output)) { return null; }
+    // node --test-reporter=tap nests tests in suites; top-level lines would count describe blocks
+    // (7 suites for 54 tests on an L-01 run), so its own totals win when it prints them
+    const total = lastMatch(output, /^# tests (\d+)$/gm);
+    const pass = lastMatch(output, /^# pass (\d+)$/gm);
+    if (total && pass) {
+      const fail = num(lastMatch(output, /^# fail (\d+)$/gm)?.[1] ?? '0') + num(lastMatch(output, /^# cancelled (\d+)$/gm)?.[1] ?? '0');
+      const skipped = num(lastMatch(output, /^# skipped (\d+)$/gm)?.[1] ?? '0') + num(lastMatch(output, /^# todo (\d+)$/gm)?.[1] ?? '0');
+      return counts(num(pass[1]), fail, skipped, num(total[1]));
+    }
     const lines = output.match(/^(?:not )?ok\b.*$/gm) ?? [];
     const skipped = lines.filter(l => /#\s*(?:SKIP|TODO)/i.test(l)).length;
     const fail = lines.filter(l => l.startsWith('not ok') && !/#\s*(?:SKIP|TODO)/i.test(l)).length;
