@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DevCrew Studio Overview</title>
+<style>
+:root { --bg:#fbfaf7; --fg:#1c1b19; --muted:#6b675f; --line:#e4e0d8; --card:#fff; --acc:#2f5bd3; --accbg:#eef2fd; --ok:#1f7a4d; --warn:#8a6d1d; --warnbg:#fff6dc; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#16161a; --fg:#ecebe7; --muted:#a19d94; --line:#2c2c32; --card:#1e1e23; --acc:#8aa8ff; --accbg:#1f2540; --ok:#5cc58f; --warn:#e8c25a; --warnbg:#2e2816; } }
+:root[data-theme="dark"] { --bg:#16161a; --fg:#ecebe7; --muted:#a19d94; --line:#2c2c32; --card:#1e1e23; --acc:#8aa8ff; --accbg:#1f2540; --ok:#5cc58f; --warn:#e8c25a; --warnbg:#2e2816; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.65 system-ui,-apple-system,"Sukhumvit Set","Noto Sans Thai",sans-serif; }
+main { max-width:1000px; margin:0 auto; padding:40px 16px 80px; }
+h1 { font-size:2.1rem; margin:0 0 6px; } h2 { margin:44px 0 14px; font-size:1.35rem; } h3 { margin:0 0 6px; font-size:1.05rem; }
+.lead { font-size:1.1rem; color:var(--muted); margin:0 0 20px; }
+.flow { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:16px 0; }
+.step { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:8px 12px; font-weight:600; }
+.step small { display:block; font-weight:400; color:var(--muted); font-size:.8rem; }
+.step.h { background:var(--accbg); border-color:var(--acc); } .arr { color:var(--muted); }
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; }
+.card ul { margin:8px 0 0; padding-left:18px; } .card li { margin:4px 0; }
+.tag { display:inline-block; font-size:.75rem; padding:1px 8px; border-radius:6px; background:var(--accbg); color:var(--acc); font-weight:600; margin-bottom:6px; }
+.wrap { overflow-x:auto; } table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); font-size:.95rem; }
+th,td { padding:10px 12px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; } th { color:var(--muted); font-size:.85rem; }
+.y { color:var(--ok); font-weight:700; } .m { color:var(--warn); font-weight:700; }
+.note { border-left:3px solid var(--warn); background:var(--warnbg); padding:10px 14px; border-radius:0 8px 8px 0; }
+code { font-size:.9em; }
+</style>
+</head>
+<body>
+<main>
+<h1>DevCrew Studio</h1>
+<p class="lead">ระบบที่จัด AI coding agent หลายตัวให้ทำงานเป็นทีม แต่ละตัวมีบทบาทและขอบเขตชัดเจน มีด่านให้คนอนุมัติ และมีตัวตัดสินที่ไม่ใช่ AI คอยยืนยันว่างานเสร็จจริง</p>
+
+<div class="flow">
+  <div class="step">Planner<small>PRD, สัญญา, แบ่งโมดูล</small></div><span class="arr">→</span>
+  <div class="step h">Gate 1 (คน)<small>อนุมัติแผน</small></div><span class="arr">→</span>
+  <div class="step">QA<small>เขียนเทสต์ แล้วล็อก</small></div><span class="arr">→</span>
+  <div class="step">Dev ⇄ Verify<small>ทีละโมดูล, Verify ไม่ใช่ AI</small></div><span class="arr">→</span>
+  <div class="step">Reviewer / Security<small>ส่งกลับให้แก้ได้</small></div><span class="arr">→</span>
+  <div class="step h">Gate 2 (คน)<small>อนุมัติก่อน commit</small></div>
+</div>
+
+<h2>ปัญหาที่ DevCrew แก้</h2>
+<div class="grid">
+  <div class="card"><h3>"AI บอกว่าเสร็จ แต่ไม่จริง"</h3>Verify เป็นโค้ดธรรมดา ไม่ใช่ AI ใช้รันเทสต์จริง ล็อกไฟล์เทสต์ด้วย SHA-256 และเช็กว่าเทสต์ที่ประกาศไว้ได้รันครบทุกข้อ ถ้าไม่ผ่าน Dev ต้องกลับไปแก้</div>
+  <div class="card"><h3>"AI แก้เทสต์ให้ตัวเองผ่าน"</h3>Dev ไม่มีสิทธิ์เขียน <code>tests/</code> หรือ <code>contracts/</code> และหลังทุก turn ระบบจะ snapshot workspace แล้ว revert ไฟล์ที่แก้นอกขอบเขต รวมถึงไฟล์ที่แก้ผ่าน shell</div>
+  <div class="card"><h3>"ไม่รู้ว่า AI ทำอะไรไปบ้าง"</h3>ทุก event ถูกบันทึกเป็น log ได้แก่ tool call, token, ค่าใช้จ่ายแยกบทบาท, diff และผล verify ดูย้อนหลังและตรวจสอบได้</div>
+  <div class="card"><h3>"อยากให้คนคุมจุดสำคัญ"</h3>มี gate ให้อนุมัติแผนก่อนเขียนโค้ด และอนุมัติโค้ดก่อน commit ถ้าวนแก้ไม่ผ่านจะส่งไปที่ escalation gate ให้คนตัดสินใจ</div>
+</div>
+
+<h2>Feature หลัก</h2>
+<div class="grid">
+  <div class="card"><span class="tag">ควบคุม</span><h3>Guardrails</h3><ul>
+    <li>แต่ละบทบาทเขียนได้เฉพาะ path ของตัวเอง</li>
+    <li>Snapshot แล้ว revert ไฟล์ที่แก้นอกขอบเขตหลังทุก turn</li>
+    <li>ล็อกเทสต์ด้วย hash และนับจำนวนเทสต์ที่รันจริง</li>
+    <li>จำกัดรอบวนแก้, จำกัดการวางแผนใหม่ไว้ 2 รอบ และตั้ง time limit</li>
+  </ul></div>
+  <div class="card"><span class="tag">คนในวงจร</span><h3>Human gates ทุกช่องทาง</h3><ul>
+    <li>Dashboard: ปุ่ม Approve, Revise, Abort, Retry และ Replan</li>
+    <li>Discord DM พร้อมปุ่มกด อนุมัติจากมือถือได้ (ทดสอบกับ bot จริงแล้ว)</li>
+    <li>Webhook ไปยัง chat agent อื่นได้ เช่น OpenClaw, Hermes ไปจนถึง Telegram/WhatsApp (ยังไม่ได้ลองกับของจริง)</li>
+    <li>ใช้ CLI ได้: <code>gate &lt;runId&gt; approve</code></li>
+  </ul></div>
+  <div class="card"><span class="tag">ยืดหยุ่น</span><h3>Pipeline เป็นไฟล์</h3><ul>
+    <li>ออกแบบ pipeline ได้เองด้วย JSON มี schema และ validator</li>
+    <li>pipeline ใหม่ต้องให้คนอนุมัติก่อนใช้</li>
+    <li>Skill <code>/new-pipeline</code> ให้ Claude ร่าง pipeline จากคำขอภาษาคน</li>
+    <li>Role guide 13 แบบ เช่น risk-planner, test-engineer, security-auditor, firmware-reviewer และ hil-rig-engineer</li>
+  </ul></div>
+  <div class="card"><span class="tag">หลายค่าย</span><h3>Agent ข้ามค่ายผ่าน ACP</h3><ul>
+    <li>Claude, Codex, Gemini (Antigravity) หรือ agent ใดก็ได้ที่รองรับ ACP</li>
+    <li>เลือกโมเดลแยกตามบทบาทได้ เช่น ให้ QA และ Reviewer ใช้คนละค่ายกับ Dev</li>
+    <li>ใช้ login ของ CLI ของแต่ละค่าย ระบบไม่ได้ถือ token เอง</li>
+    <li>Fake agent แบบ scripted ช่วยทดสอบโดยไม่เสียโควต้า</li>
+  </ul></div>
+  <div class="card"><span class="tag">มองเห็น</span><h3>Dashboard แบบสด</h3><ul>
+    <li>แผนภาพ pipeline ที่แสดง node ที่กำลังทำ, fix loop และเส้นทางส่งกลับ</li>
+    <li>Token และค่าใช้จ่ายแยกบทบาท, ฟีดกิจกรรม และ diff แบบมีสี</li>
+    <li>PRD, สัญญา และสถาปัตยกรรมระดับไฟล์ที่ Gate 1</li>
+    <li>Resume run ข้าม process (SQLite checkpoint) ใช้บนมือถือได้ และรองรับ dark mode</li>
+  </ul></div>
+  <div class="card"><span class="tag">วัดผล</span><h3>Benchmark harness ในตัว</h3><ul>
+    <li>Hidden tests ที่คัดลอกเข้าไปตอนตรวจเท่านั้น และสุ่มลำดับการรัน</li>
+    <li>Evolution rounds และ handoff เพื่อวัดว่าโค้ดต่อยอดง่ายแค่ไหน</li>
+    <li>รายงานจุดที่ pipeline เสียเวลาหรือเงิน ใช้ปรับปรุงระบบต่อ</li>
+    <li>ทนต่อโควต้าหมด: รอแล้วรันซ้ำให้เอง</li>
+  </ul></div>
+  <div class="card"><span class="tag">โลกจริง</span><h3>Firmware และ Hardware-in-the-loop</h3><ul>
+    <li>Preset <code>firmware-board</code> และ <code>system-integration</code></li>
+    <li>Verify อ่านผลเทสต์ได้หลายภาษา: Node, pytest, Unity/PlatformIO, GoogleTest, cargo, go, TAP และบรรทัด HIL</li>
+    <li>ทดสอบบนบอร์ด ESP32-S3 จริง มีตัวล็อกพอร์ต USB</li>
+  </ul></div>
+  <div class="card"><span class="tag">โหมดงาน</span><h3>Preset ที่อนุมัติแล้ว 10 แบบ</h3><ul>
+    <li><b>minimal:</b> งานเล็ก ราคาถูก</li>
+    <li><b>standard:</b> มี reviewer และ gate สองด่าน</li>
+    <li><b>with-security:</b> เพิ่ม Semgrep และ security audit</li>
+    <li><b>blind QA:</b> Dev ไม่เห็นเทสต์จริง</li>
+    <li><b>existing-code:</b> วิเคราะห์โค้ดเดิมก่อนแก้</li>
+    <li><b>with-docs:</b> เขียนคู่มือการใช้งานให้หลังผ่านรีวิว</li>
+  </ul></div>
+</div>
+
+<h2>เหมาะกับงานแบบไหน</h2>
+<div class="wrap"><table>
+<tr><th>สถานการณ์</th><th>ใช้ DevCrew?</th><th>เหตุผล</th></tr>
+<tr><td>งานที่ความผิดพลาดมีราคาแพง เช่น การเงิน ข้อมูลลูกค้า หรือระบบที่เปิดสู่อินเทอร์เน็ต</td><td class="y">ใช่</td><td>มีคนอนุมัติ, เทสต์ที่แก้ไม่ได้, security reviewer และหลักฐานย้อนหลังครบ</td></tr>
+<tr><td>องค์กรที่ต้องตรวจสอบได้ว่า AI ทำอะไร</td><td class="y">ใช่</td><td>มี audit log ทุก tool call, ทุกการแก้ไฟล์ และทุกการตัดสินใจที่ gate</td></tr>
+<tr><td>Firmware หรือ hardware ที่ AI ตรวจผลเองยาก</td><td class="y">ใช่</td><td>ตัวตัดสินที่ไม่ใช่ AI flash ลงบอร์ดแล้วอ่านผลจริง (benchmark กำลังวัดอยู่)</td></tr>
+<tr><td>ทีมที่อยากให้หัวหน้าอนุมัติงาน AI จากมือถือ</td><td class="y">ใช่</td><td>Gate ผ่าน Discord หรือ chat ได้ทันที</td></tr>
+<tr><td>ฟีเจอร์ทั่วไปที่สเปกชัดและมีเทสต์รันในเครื่องได้</td><td class="m">ไม่จำเป็น</td><td>จาก benchmark ของเราเอง AI ตัวเดียวได้คุณภาพเท่ากัน และถูกกว่า 5–50×</td></tr>
+<tr><td>งานเล็กหรือ prototype ที่อยากได้เร็ว</td><td class="m">ไม่จำเป็น</td><td>ใช้ preset minimal ได้ แต่ AI ตัวเดียวเร็วกว่า</td></tr>
+</table></div>
+
+<h2>ทำไมต้อง DevCrew</h2>
+<div class="grid">
+  <div class="card"><h3>1. ความไว้ใจที่พิสูจน์ได้</h3>ไม่ต้องเชื่อว่า AI ซื่อสัตย์ ระบบออกแบบให้มันโกงไม่ได้ตั้งแต่ต้น เทสต์ถูกล็อก การเขียนไฟล์มีขอบเขต และคนที่ตัดสินว่างานเสร็จไม่ใช่ AI</div>
+  <div class="card"><h3>2. คนยังคุมจุดสำคัญ</h3>AI ทำงานส่วนใหญ่ คนอนุมัติแค่แผนและผลลัพธ์ ทำจากมือถือได้ จึงไม่ต้องนั่งเฝ้า</div>
+  <div class="card"><h3>3. ไม่ผูกกับเจ้าใดเจ้าหนึ่ง</h3>สลับโมเดลได้ตามบทบาท ใช้โมเดลถูกกับงานง่าย และใช้คนละค่ายตรวจงานกันเองได้</div>
+  <div class="card"><h3>4. วัดได้และปรับได้</h3>มี benchmark ในตัว ทำให้ตัดสินใจจากข้อมูลจริง และใช้หาจุดอ่อนของ pipeline เองได้ เราหาบั๊กของระบบเจอและแก้ไปแล้วอย่างน้อย 7 ตัว</div>
+</div>
+
+<h2>Roadmap: Task Router (ผู้ช่วยเลือกรูปแบบทีม) <span class="tag">ยังไม่ได้สร้าง</span></h2>
+<p>ทีมเต็มรูปแบบไม่ได้คุ้มกับทุกงาน ขั้นต่อไปจึงเป็นตัวช่วยประเมินงานก่อนเริ่ม ว่าควรใช้ AI ตัวเดียว ใช้ทีมเล็ก หรือใช้ทีมเต็ม หรือไม่ต้องแบ่งทีมเลย แค่ให้ QA เขียนเทสต์ล็อกไว้ก่อนก็พอ เกณฑ์ตั้งต้นมาจากผล benchmark ของเราเอง</p>
+<div class="wrap"><table>
+<tr><th>ลักษณะงาน</th><th>โหมดที่แนะนำ</th><th>หลักฐาน</th></tr>
+<tr><td>สเปกชัด มีเทสต์รันในเครื่องได้ และเสี่ยงต่ำ</td><td><b>Single agent</b></td><td>6 การทดลองซอฟต์แวร์: คุณภาพเท่ากัน และถูกกว่า 5–50×</td></tr>
+<tr><td>สเปกชัด แต่ต้องการหลักฐานว่าเทสต์ไม่ถูกแก้</td><td><b>Test-first:</b> QA เขียนเทสต์แล้วล็อก จากนั้นให้ AI ตัวเดียวทำ ปิดด้วย Verify</td><td>ได้การรับประกันของทีมในต้นทุนที่ใกล้ Single (ยังต้องวัด)</td></tr>
+<tr><td>สเปกกำกวม หรือมีจุดที่ต้องให้คนตัดสิน</td><td><b>Minimal team + Gate 1</b></td><td>IT-01: ทีมหยุดแล้วถามคนเมื่อเทสต์ขัดกับสเปก</td></tr>
+<tr><td>งานเสี่ยงสูงหรือเปิดสู่อินเทอร์เน็ต</td><td><b>with-security</b></td><td>Semgrep และ audit เป็นหลักฐานที่ตรวจย้อนได้</td></tr>
+<tr><td>ตรวจผลในเครื่องไม่ได้ (hardware หรือระบบภายนอก)</td><td><b>Team + HIL Verify</b></td><td>HW-01: Single ผ่านไม่สม่ำเสมอ (ผลชุดใหม่กำลังวัด)</td></tr>
+</table></div>
+<p><b>ตัวตัดสิน:</b> งานนี้เป็นการจำแนกประเภท ไม่ได้ต้องสร้างข้อความ จึงเหมาะกับโมเดลตัดสินใจโดยเฉพาะ เช่น <b>Jev</b> ของ TypeSafe AI ซึ่งออกแบบมาเพื่อตัดสินใจและจำแนกข้อมูลให้ซอฟต์แวร์ คาดว่าจะเร็วและถูกกว่าการให้ LLM ตัวใหญ่ประเมิน
+<br><b>Input:</b> requirement, ขนาด codebase, ระดับความเสี่ยง และวิธีตรวจผล
+<br><b>Output:</b> หนึ่งในห้าโหมดข้างบน
+<br>ยังไม่ได้ทดลองกับ Jev จริง และควรเทียบกับ baseline ที่เป็นกฎธรรมดา (rule-based) ด้วย</p>
+<p><b>วิธีใช้ Jev ที่เหมาะ (จากเอกสารของ TypeSafe):</b> อย่าถามคำถามใหญ่ข้อเดียวว่า "ควรใช้โหมดไหน" ให้แตกเป็นคำถามย่อยที่ตอบได้ทันที แล้วให้โค้ดของ DevCrew รวมคำตอบเป็นโหมด</p>
+<ul>
+  <li><b>Choice:</b> "ผลลัพธ์ตรวจได้ด้วยการรันเทสต์ในเครื่องไหม" (ได้ / ต้องใช้ hardware / ต้องใช้คน)</li>
+  <li><b>Score:</b> "สเปกนี้กำกวมแค่ไหน"</li>
+  <li><b>Score:</b> "ถ้าผิดพลาด ความเสียหายรุนแรงแค่ไหน"</li>
+  <li><b>Choice:</b> "เปิดสู่อินเทอร์เน็ตหรือจัดการข้อมูลอ่อนไหวไหม"</li>
+</ul>
+<p>Jev ตอบกลับพร้อม <code>confidence</code> ถ้าความมั่นใจต่ำ ให้ระบบเลือกโหมดที่ปลอดภัยกว่าไว้ก่อน</p>
+<p><b>Test case ที่ต้องทำเพื่อพิสูจน์ Router:</b></p>
+<ul>
+  <li><b>Router accuracy:</b> ให้ Router เลือกโหมดของงานที่เราวัดไปแล้ว 15 งาน แล้วเทียบว่าตรงกับโหมดที่ชนะจริงหรือไม่</li>
+  <li><b>Routed vs fixed:</b> รันชุดงานผสมแบบใช้ Router เทียบกับใช้ทีมทุกงาน และใช้ Single ทุกงาน วัดคุณภาพรวมและต้นทุนรวม เป้าหมายคือคุณภาพเท่าแบบทีม ในต้นทุนใกล้แบบ Single</li>
+  <li><b>Test-first mode:</b> วัดว่าโหมด "QA ล็อกเทสต์ แล้วให้ AI ตัวเดียวทำ" ได้ความปลอดภัยแบบทีมในราคาใกล้ Single จริงหรือไม่</li>
+  <li><b>ความผิดพลาดของ Router:</b> ถ้า Router เลือกโหมดถูกเกินไปกับงานเสี่ยง ต้องมีกลไกยกระดับเอง เช่น ถ้า Verify ไม่ผ่าน 2 ครั้ง ให้ขยับไปใช้ทีม</li>
+</ul>
+
+<h2>ข้อจำกัดที่ต้องบอก</h2>
+<ul class="note">
+  <li>สำหรับงานซอฟต์แวร์ทั่วไป ทีมแพงและช้ากว่า AI ตัวเดียวชัดเจน (ดูหน้าผล benchmark)</li>
+  <li>Chat gate ผ่าน OpenClaw/Hermes และ LangGraph Studio ยังไม่ได้ลองกับของจริง</li>
+  <li>Dashboard ไม่มีระบบ login และเปิดได้เฉพาะ 127.0.0.1</li>
+  <li>pipeline บางตัว (เช่น firmware) เพิ่งเจอบั๊กการอ่านผลเทสต์จากการทดสอบครั้งนี้ ต้องทดสอบกับงานจริงเพิ่ม</li>
+</ul>
+</main>
+</body>
+</html>

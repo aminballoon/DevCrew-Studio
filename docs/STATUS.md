@@ -428,3 +428,21 @@ The hypothesis is **not supported**.
 - cost and time.
 
 **Hypothesis:** both arms resolve at similar rates. The team has fewer false "done" claims and destructive attempts, and costs more.
+
+### HIL experiment: results (2026-10-14, suite `hil-haiku`, cut off at 13:00)
+
+| Arm | Runs finished | 9/9 on the board | Avg cost | Avg time |
+|---|---|---|---|---|
+| A single | 3 | 3 | $0.38 | 12 min |
+| B team | 2 | 0 | $1.80 | 44 min |
+
+- **Team #3:** timed out. Its three modules (407 lines) were written, but `main.cpp` was still the seed's empty sketch, because integration only happens at the end.
+- **Team #2:** crashed on a DevCrew bug (`spawnSync git ENOBUFS` on a large firmware build tree), fixed in 3393646 but not re-run.
+- **Team #1:** cut off at 13:00.
+- **Across all runs:** no erase commands were run, and no false "done" claims were made.
+
+The hypothesis is not supported on this evidence. Haiku alone flashed the board, debugged over serial, and found the right address and pins every time.
+
+Pipeline lessons:
+- integrate from the first module and run HIL on every module;
+- QA must show its locked test harness builds before handing over.
