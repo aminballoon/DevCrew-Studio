@@ -13,7 +13,12 @@ export function getBus(): EventBus {
 }
 
 export function getConfig(): DevcrewConfig {
-  return (config ??= loadConfig());
+  if (!config) {
+    config = loadConfig();
+    // Tests drive real gates; they must never message your phone
+    if (process.env.DEVCREW_NO_NOTIFY) { delete config.notify; }
+  }
+  return config;
 }
 
 /** Live agent sessions per run. Not checkpointed: after a restart, sessions start fresh from the files. */

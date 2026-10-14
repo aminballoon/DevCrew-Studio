@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 // Isolate run data before any module reads DATA_ROOT
+process.env.DEVCREW_NO_NOTIFY = '1';
 process.env.DEVCREW_DATA = mkdtempSync(join(tmpdir(), 'devcrew-data-'));
 process.env.FAKE_DELAY_MS = '0';
 
