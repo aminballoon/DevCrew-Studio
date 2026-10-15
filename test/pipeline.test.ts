@@ -349,14 +349,22 @@ test('fast-arch: the Architect designs once, Verify enforces it, and the next ru
   // Its committed acceptance/ holds the first change's hidden tests: they must stay hidden from the Builder
   let secondWorkspace = '';
   const builderSaw: boolean[] = [];
+  const reviewerSaw: boolean[] = [];
   const unsubscribe = getBus().subscribe(e => {
     if (e.type === 'run_started') { secondWorkspace = e.workspace; }
     if (e.type === 'agent_input' && e.role === 'dev' && secondWorkspace) { builderSaw.push(existsSync(join(secondWorkspace, 'acceptance'))); }
+    if (e.type === 'agent_input' && e.role === 'reviewer' && secondWorkspace) { reviewerSaw.push(existsSync(join(secondWorkspace, 'acceptance'))); }
   });
   const second = runs.start({ requirement, source: workspace?.type === 'run_started' ? workspace.workspace : '', profile: 'fake-fast', autoApprove: true, pipeline: 'fast-arch' });
   assert.equal(await runs.waitFor(second), 'approved');
   unsubscribe();
   assert.ok(builderSaw.length && builderSaw.every(seen => !seen), `the Builder saw acceptance/: ${JSON.stringify(builderSaw)}`);
+  // The reviewer reads the code as it will be committed: the earlier hidden tests in place, not deleted
+  assert.deepEqual(reviewerSaw, [true]);
+  const review = getBus().read(second).find(e => e.type === 'agent_input' && e.role === 'reviewer');
+  const reviewPrompt = review?.type === 'agent_input' ? review.prompt : '';
+  assert.match(reviewPrompt, /acceptance\/ holds QA's hidden acceptance tests/);
+  assert.doesNotMatch(reviewPrompt, /deleted file mode[^\n]*\n[^\n]*\n[^\n]*acceptance\/|--- a\/acceptance\//);
   assert.equal(getBus().read(second).flatMap(e => (e.type === 'node_started' ? [e.node] : []))[0], 'qa');
 });
 

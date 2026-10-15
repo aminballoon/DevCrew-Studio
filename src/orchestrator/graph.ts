@@ -414,7 +414,8 @@ const architectureFiles = (ws: string) => (existsSync(join(ws, ARCHITECTURE_FILE
 /** The Builder writes everything except QA's hidden tests and, once there is one, the architecture it builds in. */
 const builderScope = (ws: string) => ({
   write: ['*'],
-  deny: [`${ACCEPTANCE}/`, ACCEPTANCE_RUN, ...(existsSync(join(ws, ARCHITECTURE_FILE)) ? [ARCHITECTURE_FILE, ARCHITECTURE_DOC, 'contracts/'] : [])],
+  // contracts/ stays the Builder's to extend: frozen, it fell behind the code in every later change (roadmap-self)
+  deny: [`${ACCEPTANCE}/`, ACCEPTANCE_RUN, ...(existsSync(join(ws, ARCHITECTURE_FILE)) ? [ARCHITECTURE_FILE, ARCHITECTURE_DOC] : [])],
 });
 
 /** A Builder's answer that says the requirement needs another architecture. */
@@ -554,8 +555,20 @@ const escalate = async (s: S): Promise<U> => {
   return { decision: 'abort', status: 'aborted' };
 };
 
+/**
+ * A step after a blind build reads the workspace with the hidden tests in place, as they will be
+ * committed: hidden, an earlier run's acceptance/ looks deleted and a reviewer asks to restore it.
+ */
+const withHiddenTests = <T>(s: S, seesHidden: boolean, work: () => Promise<T>): Promise<T> => {
+  if (!seesHidden) { return work(); }
+  showAcceptance(s);
+  return work().finally(() => hideAcceptance(s));
+};
+
 /** A role defined in the pipeline file, with its own scope, agent and optional verdict. */
-const agentNode = (step: AgentStep, nextStep: Step | undefined) => node(step.id, async s => {
+const agentNode = (step: AgentStep, nextStep: Step | undefined, seesHidden: boolean) => node(step.id, s => withHiddenTests(s, seesHidden, () => agentStep(step, nextStep, s, seesHidden)));
+
+async function agentStep(step: AgentStep, nextStep: Step | undefined, s: S, seesHidden: boolean): Promise<U> {
   const sentBack = s.rounds[step.id] ?? 0;
   const sendsBack = step.verdict?.onChanges === 'dev';
   const io = {
@@ -573,6 +586,7 @@ const agentNode = (step: AgentStep, nextStep: Step | undefined) => node(step.id,
     feedback: sentBack ? s.reviews[step.id] ?? null : null,
     gateFeedback,
     clauses: requirementClauses(s.requirement),
+    hiddenTests: seesHidden && existsSync(acceptanceStore(s)),
     // A reviewer read the repo with ~30 tool calls to find what changed (952k tokens on L-03); give it the diff
     diff: step.reads.includes('git diff') ? pastedDiff(s.workspace!) : undefined,
   }));
@@ -608,10 +622,23 @@ const agentNode = (step: AgentStep, nextStep: Step | undefined) => node(step.id,
     };
   }
   return { reviews, decision: 'continue' };
-});
+}
 
 /** A pause for you: review the plan (spec and architecture) or the code (diff, tests, reviews). */
-const gateNode = (def: PipelineDef, step: GateStep) => async (s: S): Promise<U> => {
+const gateNode = (def: PipelineDef, step: GateStep, seesHidden: boolean) => async (s: S): Promise<U> => {
+  if (!seesHidden) { return gateStep(def, step, s); }
+  // You see the diff as it will be committed; the Builder works without the hidden tests again after
+  showAcceptance(s);
+  let out: U | undefined;
+  try {
+    out = await gateStep(def, step, s);
+    return out;
+  } finally {
+    if (out?.status !== 'approved') { hideAcceptance(s); }
+  }
+};
+
+async function gateStep(def: PipelineDef, step: GateStep, s: S): Promise<U> {
   const isLast = def.steps[def.steps.length - 1].id === step.id;
   // Every report written by the agent steps before this gate
   const reports = collectReports(s.workspace!.path, def, def.steps.findIndex(x => x.id === step.id));
@@ -677,7 +704,7 @@ const gateNode = (def: PipelineDef, step: GateStep) => async (s: S): Promise<U> 
     return { decision: 'revise', feedback: answer.feedback ?? null, specIssue: null, revisedTo: target.type === 'agent' ? target.id : null };
   }
   return { decision: 'abort', status: 'aborted' };
-};
+}
 
 const setup = (def: PipelineDef) => async (s: S): Promise<U> => {
   if (s.workspace) { return {}; }
@@ -708,6 +735,7 @@ export function buildGraph(def: PipelineDef = loadPipeline('standard')) {
   const next = (id: string) => steps[at(id) + 1];
   const nextNode = (id: string) => (next(id) ? entryNode(next(id)!) : 'finish');
   const build = steps.find(x => x.type === 'build');
+  const afterBuild = (step: Step) => !!build && steps.indexOf(step) > steps.indexOf(build);
   const maxAttempts = (build?.type === 'build' && build.maxAttempts) || getConfig().maxFixAttempts;
 
   // Node names come from the file, so the graph is assembled without static typing
@@ -770,7 +798,7 @@ export function buildGraph(def: PipelineDef = loadPipeline('standard')) {
         const midBuild = isFast(def) && step.review === 'architecture';
         const after = nextNode(step.id);
         const back = entryNode(steps.find(x => x.id === step.reviseTo)!);
-        g.addNode(step.id, gateNode(def, step))
+        g.addNode(step.id, gateNode(def, step, isBlind(def) && afterBuild(step)))
           .addConditionalEdges(step.id, (s: S) => (s.decision === 'approve' ? (midBuild && s.acceptanceRun ? 'dev' : after) : s.decision === 'revise' ? back : 'finish'),
             [...new Set([after, back, 'finish', ...(midBuild ? ['dev'] : [])])]);
         break;
@@ -779,7 +807,7 @@ export function buildGraph(def: PipelineDef = loadPipeline('standard')) {
         const after = nextNode(step.id);
         // Only steps after build can send work back to Dev (the validator enforces it)
         const canSendBack = step.verdict?.onChanges === 'dev' && build;
-        g.addNode(step.id, agentNode(step, next(step.id)))
+        g.addNode(step.id, agentNode(step, next(step.id), isBlind(def) && afterBuild(step)))
           .addConditionalEdges(step.id, (s: S) => (canSendBack && s.decision === 'changes' ? 'dev' : after), canSendBack ? [...new Set([after, 'dev'])] : [after]);
         break;
       }

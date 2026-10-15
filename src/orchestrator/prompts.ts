@@ -166,7 +166,7 @@ You are the Builder. You alone plan and write the code for this requirement, wit
 ${sourceOfTruth(requirement, clauses)}
 A QA engineer is writing acceptance tests from the same requirement right now, without seeing your code. Your work is judged by those hidden tests and by yours. Use exactly the names, paths, signatures, errors and formats the requirement gives, because the hidden tests will.
 
-${architecture.length ? `The project's architecture is fixed. Put each piece of code in the module that owns it, import other modules only as "mayUse" allows and only through their "interface", and implement contracts/ exactly; you cannot change contracts/ or the architecture files. Verify rejects imports that break the rules. If the requirement truly cannot be built inside this architecture, stop and reply with a line starting with "ARCH_CHANGE:" saying what must change and why; a person decides.${filesBlock(architecture)}\n` : ''}Do this:
+${architecture.length ? `The project's architecture is fixed. Put each piece of code in the module that owns it, import other modules only as "mayUse" allows and only through their "interface", and implement contracts/ exactly. Keep contracts/ in step with the code: when this change adds or changes a public signature, update its contract file in the same change. You cannot change the architecture files. Verify rejects imports that break the rules. If the requirement truly cannot be built inside this architecture, stop and reply with a line starting with "ARCH_CHANGE:" saying what must change and why; a person decides.${filesBlock(architecture)}\n` : ''}Do this:
 1. Look at the existing files, then implement everything the requirement asks, in the project's own language and conventions.
 2. Write tests in tests/ for the behaviour the requirement describes, with the project's own test tool, and run them until they pass. Keep them lean.
 3. Write ${runFile(BUILDER_TESTS, 'your tests')}
@@ -238,13 +238,13 @@ End with a short summary of what you changed.`;
 /** Any reviewer that can send work back: a gap against the requirement is never optional. */
 export const REQUIREMENT_RULE = 'Check every requirement clause against the code. Code that does not do what a clause says is a must-fix finding whatever its severity: answer "VERDICT: changes" for it and name the clause (R-n).';
 
-export function reviewerPrompt(baseCommit: string, requirement = '', clauses: Clause[] = [], diff?: string): string {
+export function reviewerPrompt(baseCommit: string, requirement = '', clauses: Clause[] = [], diff?: string, hiddenTests = false): string {
   return `${header('reviewer')}
 You are the code reviewer. The tests already pass; your job is what tests cannot see.
 ${requirement ? `\n${sourceOfTruth(requirement, clauses)}${REQUIREMENT_RULE}\n` : ''}
 Review the changes${diff ? ' (the full diff is below; read other files only where you need more context)' : ` with \`git diff ${baseCommit}\``} against .devcrew/PRD.md, contracts/ and any ADRs in .devcrew/adr/, where they exist.${diff ? `\n\`\`\`diff\n${diff}\n\`\`\`` : ''}
 Look for: design problems, duplication, unclear names, missing error handling, security issues, and acceptance criteria that are tested only weakly.
-
+${hiddenTests ? `acceptance/ holds QA's hidden acceptance tests: Verify ran all of them and they pass, and the developer never sees them, so do not ask for changes there or for wiring them into the test script.\n` : ''}
 Write your review to .devcrew/review.md (the only file you may write). Its first line must be exactly
 "VERDICT: approve" or "VERDICT: changes", followed by findings ordered by severity, each with file:line.`;
 }
@@ -286,12 +286,14 @@ export function agentStepPrompt(step: AgentStep, opts: {
   clauses?: Clause[];
   /** The changes so far, pasted for a step that reads "git diff" (none when too big to paste). */
   diff?: string;
+  /** acceptance/ holds QA's hidden tests, which Verify has run and the Builder never sees. */
+  hiddenTests?: boolean;
 }): string {
   if (step.instructions === 'builtin:architect') {
     return architectPrompt(opts.requirement, opts.clauses ?? [], opts.gateFeedback ?? null).replace(header('architect'), header(step.id, '-', opts.round));
   }
   if (step.instructions === 'builtin:reviewer') {
-    return reviewerPrompt(opts.baseCommit, opts.requirement, opts.clauses, opts.diff).replace(header('reviewer'), header(step.id, '-', opts.round));
+    return reviewerPrompt(opts.baseCommit, opts.requirement, opts.clauses, opts.diff, opts.hiddenTests).replace(header('reviewer'), header(step.id, '-', opts.round));
   }
   const reads = step.reads.map(r => (r === 'git diff' ? `- every change so far: \`git diff ${opts.baseCommit}\`` : `- ${r}`)).join('\n');
   const diagram = step.mayWrite.some(p => p === SYSTEM_DIAGRAM || (p.endsWith('/') && SYSTEM_DIAGRAM.startsWith(p)))

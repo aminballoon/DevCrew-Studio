@@ -126,7 +126,7 @@ function problems(r: Result, events: DevcrewEvent[]): string[] {
     if (e.type === 'agent_text' && e.role === 'dev') { devText += e.text; }
     if (e.type === 'node_finished' && e.node === 'dev') {
       const issue = devText.match(/^SPEC_ISSUE:\s*(.+)$/m)?.[1];
-      if (issue) { p.push(`Dev reported a spec issue, so the run went back to the Planner and redid every module: ${issue.slice(0, 200)}`); }
+      if (issue) { p.push(`Dev disputed a test (SPEC_ISSUE): ${issue.slice(0, 200)}`); }
       devText = '';
     }
   }
