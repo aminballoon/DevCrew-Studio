@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { createServer, type IncomingHttpHeaders } from 'node:http';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -37,7 +37,7 @@ test('a waiting gate is sent to OpenClaw and Hermes, and the chat agent can answ
   };
   try {
     const runs = new RunManager();
-    const runId = runs.start({ requirement: 'Shopping cart\nmore', source: join(STUDIO_ROOT, 'bench/tasks/S-01-cart/seed'), profile: 'fake', pipeline: JSON.parse(readFileSync(join(STUDIO_ROOT, 'test/fixtures/pipelines/standard.json'), 'utf8')) });
+    const runId = runs.start({ requirement: 'Shopping cart\nmore', source: join(STUDIO_ROOT, 'bench/tasks/S-01-cart/seed'), profile: 'fake', pipeline: 'fast' });
     await new Promise<void>(resolve => getBus().subscribe(e => { if (e.runId === runId && e.type === 'gate_waiting') resolve(); }));
 
     const oc = got.find(g => g.path === '/hooks/agent')!;
@@ -74,7 +74,7 @@ test('a waiting gate is sent to OpenClaw and Hermes, and the chat agent can answ
 test('Discord buttons: only allowed users answer, revise asks for feedback, the buttons go away', async () => {
   const { gateMessage, handleInteraction } = await import('../src/core/discord');
   const { gateNotice } = await import('../src/core/notify');
-  const n = gateNotice({ channels: [] }, 'r1', 'gate_spec', { kind: 'spec', title: 'Approve the plan' }, 'Cart');
+  const n = gateNotice({ channels: [] }, 'r1', 'gate_merge', { kind: 'code', title: 'Approve the code' }, 'Cart');
   assert.deepEqual(gateMessage(n).body.components[0].components.map(b => b.custom_id), ['devcrew|r1|approve', 'devcrew|r1|revise', 'devcrew|r1|abort']);
 
   const calls: unknown[][] = [];
@@ -104,19 +104,16 @@ test('Discord buttons: only allowed users answer, revise asks for feedback, the 
   assert.match(failing.data.content, /not waiting/);
 });
 
-test('Discord: the plan gate shows criteria and uncovered sentences, a typed comment becomes a choice', async () => {
+test('Discord: the architecture gate shows the modules and decisions, a typed comment becomes a choice', async () => {
   const { gateMessage, handleMessage, handleInteraction } = await import('../src/core/discord');
   const { gateNotice } = await import('../src/core/notify');
-  const prd = '# PRD\n\n## Goal\nA cart in cents.\n\n## Acceptance Criteria\n- AC-1 Adds items.\n- AC-2 Rejects negative prices.\n';
-  const payload = { kind: 'plan', title: 'Review the plan', prd, clauses: [{ id: 'R-1', text: 'Add items' }, { id: 'R-2', text: 'Trim titles' }],
-    plan: { modules: [{ id: 'core', title: 'Core' }], coverage: { 'R-1': ['AC-1'], 'R-2': [] } } };
-  const { body, files } = gateMessage(gateNotice({ channels: [] }, 'r1', 'gate_spec', payload, 'Cart'), payload);
+  const payload = { kind: 'architecture', title: 'Approve the architecture', doc: '# Architecture\nMoney is integer cents.',
+    architecture: { modules: [{ id: 'money', path: 'src/money/', purpose: 'Cents and rounding', mayUse: [] }, { id: 'cart', path: 'src/cart.ts', purpose: 'The cart', mayUse: ['money'] }], decisions: [{ id: 'ADR-1', title: 'Integer cents' }] } };
+  const { body, files } = gateMessage(gateNotice({ channels: [] }, 'r1', 'gate_arch', payload, 'Cart'), payload);
   const text = JSON.stringify(body.embeds);
-  assert.match(text, /A cart in cents/);
-  assert.match(text, /AC-2\*\* Rejects negative prices/);
-  assert.match(text, /Not covered: R-2/);
-  assert.match(text, /Added by the Planner[^"]*AC-2/);
-  assert.deepEqual(files.map(f => f.name), ['PRD.md']);
+  assert.match(text, /\*\*cart\*\* `src\/cart.ts` The cart · uses money/);
+  assert.match(text, /ADR-1\*\* Integer cents/);
+  assert.deepEqual(files.map(f => f.name), ['ARCHITECTURE.md']);
 
   const calls: unknown[][] = [];
   const host = { resolve: async (...a: unknown[]) => { calls.push(a); }, waiting: () => ['20261014-abcdef'], decisionsOf: () => ['approve', 'revise', 'abort'] };

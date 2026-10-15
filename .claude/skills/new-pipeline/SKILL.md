@@ -22,11 +22,11 @@ Read these first, every time:
 Work out from the request:
 
 - Which extra roles are needed, what each one is for, what it reads and what it hands on.
-- Whether a role should be able to **send the code back to Dev** (a blocking check, like security) or only **report** (advice the user reads at the code gate).
-- Which pipeline it starts from (usually `standard`).
-- Whether a role must work **before the Planner** (read existing code, research hardware, prepare
-  a test rig) so the plan is made with its findings. Such roles may only write under `.devcrew/`.
-- Whether the result is **code** (a build pipeline) or **only a design** (`"kind": "design"`: agent
+- Whether a role should be able to **send the code back to the Builder** (a blocking check, like security) or only **report** (advice the user reads at the code gate).
+- Which pipeline it starts from (usually `fast`, or `fast-arch` for a project that will grow). Check `pipelines/addons/` first: a request that an add-on already covers needs no new pipeline.
+- Whether a role must work **before QA and the Builder** (read existing code, research hardware,
+  prepare a test rig) so they start from its findings. Such roles may only write under `.devcrew/`.
+- Whether the result is **code** (a fast pipeline) or **only a design** (`"kind": "design"`: agent
   steps and design gates, ending in documents and a system architecture diagram).
 
 If something that changes the design is unclear (for example: should the new role block the
@@ -47,7 +47,7 @@ Guidelines for good roles:
   Never `tests/`, `contracts/` or `*`; the validator refuses them.
 - Give blocking roles a `verdict` with `"onChanges": "dev"` and a small `maxRounds` (1 or 2).
   Advisory roles use `"onChanges": "continue"`.
-- Keep the plan gate right after the planner and the code gate last. The user must review both.
+- Keep the code gate last; the user must review the code before it is committed.
   In a design pipeline, end with a `design` gate; add an earlier one where the user should steer.
 - A role that draws the system diagram needs `.devcrew/system.json` in `mayWrite`; the platform
   gives it the format. Say in its instructions what the diagram must contain.

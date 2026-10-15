@@ -31,8 +31,11 @@ export interface DevcrewConfig {
 
 /** Repository root of DevCrew Studio itself (config, agents/, bench/). */
 export const STUDIO_ROOT = resolve(import.meta.dirname, '../..');
-/** Run data: event logs, checkpoints and copied workspaces. Git-ignored. */
-export const DATA_ROOT = process.env.DEVCREW_DATA ?? join(STUDIO_ROOT, '.devcrew-data');
+/**
+ * Run data: event logs, checkpoints and copied workspaces. Git-ignored. Always absolute: agents get
+ * workspaces under it as their working folder, and a relative one put their files somewhere else.
+ */
+export const DATA_ROOT = resolve(STUDIO_ROOT, process.env.DEVCREW_DATA ?? '.devcrew-data');
 
 export function loadConfig(path = join(STUDIO_ROOT, 'devcrew.config.json')): DevcrewConfig {
   return JSON.parse(readFileSync(path, 'utf8')) as DevcrewConfig;

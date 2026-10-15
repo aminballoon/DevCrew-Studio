@@ -1,1 +1,18 @@
-{"id":"ext-bmad","mode":"external","workflow":"bmad","model":"claude-haiku-5-5","profile":"external","name":"Outside: bmad","role":"control"}
+{
+  "id": "ext-bmad",
+  "code": "M",
+  "name": "BMAD Method",
+  "summary": "A popular agile multi-agent method for Claude Code, run with its own unattended build (spec, plan, build, review with subagents). Nothing from DevCrew takes part.",
+  "agents": 3,
+  "steps": [
+    "Spec and plan",
+    "Build",
+    "Review with subagents"
+  ],
+  "role": "control",
+  "color": "#f97316",
+  "mode": "external",
+  "workflow": "bmad",
+  "model": "claude-haiku-5-5",
+  "profile": "external"
+}

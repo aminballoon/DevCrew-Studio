@@ -1,92 +1,146 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { STUDIO_ROOT } from '../src/core/config';
-import { composePipeline, guidesOf, loadPipeline, validatePipeline, withGuides, type PipelineDef } from '../src/pipeline/schema';
+import { composePipeline, guidesOf, loadPipeline, validatePipeline, withGuides, type AgentStep, type PipelineDef } from '../src/pipeline/schema';
 
-// Pipelines with a Planner are kept as test fixtures: the product ships single, fast and fast-arch
-const read = (id: string) => JSON.parse(readFileSync(join(STUDIO_ROOT, existsSync(join(STUDIO_ROOT, 'pipelines', `${id}.json`)) ? 'pipelines' : 'test/fixtures/pipelines', `${id}.json`), 'utf8')) as PipelineDef;
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x));
+const fast = () => clone(loadPipeline('fast'));
+const agent = (id: string, extra: Partial<AgentStep> = {}): AgentStep => ({ type: 'agent', id, name: id, purpose: `The ${id}.`, instructions: `Do the work of the ${id} role.`, reads: [], mayWrite: [`.devcrew/${id}.md`], produces: [], ...extra });
+/** A step right after the build, where reviewers go. */
+const afterBuild = (def: PipelineDef, step: PipelineDef['steps'][number]) => { def.steps.splice(def.steps.findIndex(s => s.type === 'build') + 1, 0, step); return def; };
 
-test('every shipped pipeline is valid', () => {
+test('every shipped pipeline and add-on is valid', () => {
   for (const f of readdirSync(join(STUDIO_ROOT, 'pipelines')).filter(f => f.endsWith('.json'))) {
-    assert.deepEqual(validatePipeline(read(f.replace('.json', ''))), [], f);
+    assert.deepEqual(validatePipeline(JSON.parse(readFileSync(join(STUDIO_ROOT, 'pipelines', f), 'utf8'))), [], f);
+  }
+  for (const base of ['fast', 'fast-arch']) {
+    composePipeline(loadPipeline(base), ['codebase', 'hardware', 'security', 'docs']);
   }
 });
 
-test('you must review the plan first and the code last', () => {
-  const noPlanGate = clone(read('standard'));
-  noPlanGate.steps.splice(1, 1);
-  assert.match(validatePipeline(noPlanGate).join('\n'), /right after the planner must be a gate/);
-
-  const noCodeGate = clone(read('standard'));
-  noCodeGate.steps.pop();
+test('a fast pipeline opens with a blind QA and the build, and ends with the code gate', () => {
+  const def = fast();
+  assert.deepEqual(validatePipeline(def), []);
+  const seeing = { ...def, steps: def.steps.map(s => (s.type === 'qa' ? { ...s, blind: false } : s)) };
+  assert.ok(validatePipeline(seeing).some(e => /must be blind/.test(e)));
+  const swapped = { ...def, steps: [def.steps[1], def.steps[0], ...def.steps.slice(2)] };
+  assert.ok(validatePipeline(swapped).some(e => /before "qa"/i.test(e)));
+  const noCodeGate = { ...def, steps: def.steps.slice(0, -1) };
   assert.match(validatePipeline(noCodeGate).join('\n'), /last step must be a gate with "review": "code"/);
+  assert.match(validatePipeline({ ...def, kind: undefined } as unknown as PipelineDef).join('\n'), /"kind" must be "fast"/);
+  // An Architect may come right before QA, followed by the gate where you approve its design
+  const arch = loadPipeline('fast-arch');
+  assert.deepEqual(validatePipeline(arch), []);
+  const noGate = { ...arch, steps: arch.steps.filter(s => s.id !== 'gate_arch') };
+  assert.ok(validatePipeline(noGate).some(e => /architect step .* only a gate/.test(e)));
+  const designWithArchitect: PipelineDef = { id: 'design', name: 'd', description: 'd', kind: 'design', steps: [{ ...arch.steps[0] }, { type: 'gate', id: 'gate_d', title: 'g', review: 'design', reviseTo: 'architect' }] };
+  assert.ok(validatePipeline(designWithArchitect).some(e => /belongs in a fast pipeline/.test(e)));
 });
 
 test('extra roles cannot touch locked files or write everywhere', () => {
-  const def = clone(read('with-security'));
-  const security = def.steps.find(s => s.id === 'security')!;
-  if (security.type !== 'agent') throw new Error('expected agent');
-  security.mayWrite = ['tests/', '*'];
+  const def = afterBuild(fast(), agent('security', { mayWrite: ['tests/', '*'] }));
   const errors = validatePipeline(def).join('\n');
   assert.match(errors, /may not write "tests\/"/);
   assert.match(errors, /cannot be everything/);
 });
 
-test('only steps after build may send work back to Dev, and loops are capped', () => {
-  const def = clone(read('with-security'));
-  const security = def.steps.splice(def.steps.findIndex(s => s.id === 'security'), 1)[0];
-  def.steps.splice(2, 0, security); // before qa and build
-  if (security.type !== 'agent') throw new Error('expected agent');
-  security.verdict!.maxRounds = 9;
+test('only steps after build may send work back to the Builder, and loops are capped', () => {
+  const def = fast();
+  def.steps.unshift(agent('security', { verdict: { file: '.devcrew/security.md', onChanges: 'dev', maxRounds: 9 } }));
   const errors = validatePipeline(def).join('\n');
-  assert.match(errors, /only steps after "build" can send work back to Dev/);
+  assert.match(errors, /only steps after "build" can send work back to the Builder/);
   assert.match(errors, /maxRounds" must be a whole number from 1 to 5/);
 });
 
 test('built-in steps appear exactly once, ids are unique and not reserved', () => {
-  const def = clone(read('standard'));
+  const def = fast();
   def.steps.push({ type: 'qa', id: 'qa' });
-  def.steps.push({ ...def.steps[4], id: 'dev' } as PipelineDef['steps'][number]);
+  afterBuild(def, agent('dev'));
   const errors = validatePipeline(def).join('\n');
-  assert.match(errors, /exactly one "qa" step/);
+  assert.match(errors, /exactly one "qa" and one "build" step/);
   assert.match(errors, /"dev" is reserved/);
 });
 
-test('roles before the planner only write notes under .devcrew/, and no gate comes before it', () => {
-  const def = clone(read('standard'));
-  def.steps.unshift(
-    { type: 'agent', id: 'research', name: 'Researcher', purpose: 'Finds facts first.', instructions: 'Read the workspace and write what you find.', reads: [], mayWrite: ['src/'], produces: [] },
-    { type: 'gate', id: 'gate_early', title: 'Too early', review: 'plan', reviseTo: 'research' },
-  );
-  const errors = validatePipeline(def).join('\n');
-  assert.match(errors, /before the planner may only write under \.devcrew\//);
-  assert.match(errors, /only agent steps may come before the planner/);
-
-  def.steps.splice(1, 1);
-  (def.steps[0] as { mayWrite: string[] }).mayWrite = ['.devcrew/research.md'];
-  assert.deepEqual(validatePipeline(def), []);
-});
-
 test('a design pipeline has no code steps and ends with a design gate', () => {
-  const agent: PipelineDef['steps'][number] = { type: 'agent', id: 'architect', name: 'Architect', purpose: 'Draws the system.', instructions: 'Draw the system architecture diagram.', reads: [], mayWrite: ['.devcrew/system.json'], produces: [] };
-  const ok: PipelineDef = { id: 'design-test', name: 'Design', description: 'Design only.', kind: 'design', steps: [agent, { type: 'gate', id: 'gate_final', title: 'Approve the design', review: 'design', reviseTo: 'architect' }] };
+  const ok: PipelineDef = { id: 'design-test', name: 'Design', description: 'Design only.', kind: 'design', steps: [agent('architect', { mayWrite: ['.devcrew/system.json'] }), { type: 'gate', id: 'gate_final', title: 'Approve the design', review: 'design', reviseTo: 'architect' }] };
   assert.deepEqual(validatePipeline(ok), []);
 
   const withCode = clone(ok);
-  withCode.steps.unshift({ type: 'planner', id: 'planner' });
-  assert.match(validatePipeline(withCode).join('\n'), /design pipeline has no "planner" step/);
+  withCode.steps.unshift({ type: 'qa', id: 'qa', blind: true });
+  assert.match(validatePipeline(withCode).join('\n'), /design pipeline has no "qa" step/);
 
   const wrongGate = clone(ok);
   (wrongGate.steps[1] as { review: string }).review = 'code';
   assert.match(validatePipeline(wrongGate).join('\n'), /last step must be a gate with "review": "design"/);
 
-  const designInBuild = clone(read('standard'));
-  (designInBuild.steps[1] as { review: string }).review = 'design';
-  assert.match(validatePipeline(designInBuild).join('\n'), /"review" must be "plan" or "code"/);
+  const designInFast = fast();
+  designInFast.steps.splice(-1, 0, { type: 'gate', id: 'gate_design', title: 'A design gate', review: 'design', reviseTo: 'build' });
+  assert.match(validatePipeline(designInFast).join('\n'), /"review" must be "architecture" or "code"/);
+});
+
+test('a role can follow a guide file; a missing guide is an error', () => {
+  const def = afterBuild(fast(), agent('scout', { instructions: 'guide:hardware-scout', needs: ['web'], mayWrite: ['.devcrew/hardware/'] }));
+  assert.deepEqual(validatePipeline(def), []);
+  const scout = withGuides(def).steps.find(s => s.id === 'scout');
+  assert.ok(scout?.type === 'agent' && scout.instructions.startsWith('# Hardware scout'));
+
+  const step = def.steps.find(s => s.id === 'scout') as AgentStep;
+  step.instructions = 'guide:no-such-guide';
+  (step as { needs: string[] }).needs = ['telepathy'];
+  const errors = validatePipeline(def).join('\n');
+  assert.match(errors, /no role guide pipelines\/roles\/no-such-guide\.md/);
+  assert.match(errors, /"needs" must be a list of web, shell/);
+});
+
+test('approving records the guides; editing one later blocks the pipeline until it is reviewed again', async () => {
+  const { reviewDraft, listPipelines, ROLES_DIR, DRAFTS_DIR, PIPELINES_DIR } = await import('../src/pipeline/schema');
+  const { writeFileSync, unlinkSync, existsSync } = await import('node:fs');
+  const id = 'guide-lock-test';
+  const guide = join(ROLES_DIR, `${id}.md`);
+  const def = afterBuild({ ...fast(), id }, agent('helper', { instructions: `guide:${id}` }));
+  try {
+    writeFileSync(guide, '# Helper\n\nWrite a short note.\n');
+    writeFileSync(join(DRAFTS_DIR, `${id}.json`), JSON.stringify(def));
+    reviewDraft(id, 'approve');
+    const approved = JSON.parse(readFileSync(join(PIPELINES_DIR, `${id}.json`), 'utf8')) as PipelineDef;
+    assert.ok(approved.guideHashes?.[id]);
+    assert.equal(loadPipeline(id).id, id);
+
+    writeFileSync(guide, '# Helper\n\nWrite a long note and change some files.\n');
+    assert.throws(() => loadPipeline(id), /changed since this pipeline was approved/);
+    assert.match(listPipelines().find(p => p.id === id && !p.draft)!.errors.join('\n'), /changed since this pipeline was approved/);
+  } finally {
+    for (const f of [guide, join(PIPELINES_DIR, `${id}.json`), join(DRAFTS_DIR, `${id}.json`), join(DRAFTS_DIR, `${id}.review.json`)]) {
+      if (existsSync(f)) unlinkSync(f);
+    }
+  }
+});
+
+test('built-in steps can add a role guide; a missing guide is a problem', () => {
+  const base = fast();
+  const withGuide = { ...base, id: 'guided', steps: base.steps.map(s => (s.type === 'qa' ? { ...s, guide: 'guide:test-engineer' } : s)) };
+  assert.deepEqual(validatePipeline(withGuide), []);
+  assert.deepEqual(guidesOf(withGuide), ['test-engineer']);
+  const qa = withGuides(withGuide).steps.find(s => s.type === 'qa') as { guideText?: string };
+  assert.match(qa.guideText ?? '', /^# Test engineer/);
+  const missing = { ...withGuide, steps: withGuide.steps.map(s => (s.type === 'qa' ? { ...s, guide: 'guide:no-such-guide' } : s)) };
+  assert.match(validatePipeline(missing).join(' '), /no role guide pipelines\/roles\/no-such-guide\.md/);
+});
+
+test('add-ons attach to a fast pipeline: research roles first, reviewers after the build, writers last', () => {
+  const def = composePipeline(loadPipeline('fast-arch'), ['codebase', 'security', 'docs']);
+  assert.deepEqual(def.steps.map(s => s.id), ['codebase', 'architect', 'gate_arch', 'qa', 'build', 'security', 'reviewer', 'docs', 'gate_merge']);
+  assert.deepEqual(def.addons, ['codebase', 'security', 'docs']);
+  assert.match(def.name, /\+ Codebase analyst \+ Security review \+ Usage docs$/);
+  assert.throws(() => composePipeline(loadPipeline('system-integration'), ['docs']), /attach to fast pipelines/);
+  assert.throws(() => composePipeline(loadPipeline('fast'), ['nope']), /No add-on "nope"/);
+  // Before QA there is room for research only, never for a role that writes code
+  const def2 = fast();
+  def2.steps.unshift(agent('early', { mayWrite: ['src/'] }));
+  assert.ok(validatePipeline(def2).some(e => /research roles/.test(e)));
 });
 
 test('every draft pipeline is valid', () => {
@@ -109,47 +163,6 @@ test('a profile entry for a step overrides the agent the pipeline names', async 
   assert.equal(agentForTurn(cfg, { profile: 'fake', role: 'scout', agentName: 'codex' }).name, 'fake');
 });
 
-test('a role can follow a guide file; a missing guide is an error', async () => {
-  const { withGuides } = await import('../src/pipeline/schema');
-  const def = clone(read('standard'));
-  def.steps.splice(5, 0, { type: 'agent', id: 'scout', name: 'Scout', purpose: 'Finds parts.', instructions: 'guide:hardware-scout', needs: ['web'], reads: [], mayWrite: ['.devcrew/hardware/'], produces: [] });
-  assert.deepEqual(validatePipeline(def), []);
-  const scout = withGuides(def).steps.find(s => s.id === 'scout');
-  assert.ok(scout?.type === 'agent' && scout.instructions.startsWith('# Hardware scout'));
-
-  (def.steps[5] as { instructions: string }).instructions = 'guide:no-such-guide';
-  (def.steps[5] as { needs: string[] }).needs = ['telepathy'];
-  const errors = validatePipeline(def).join('\n');
-  assert.match(errors, /no role guide pipelines\/roles\/no-such-guide\.md/);
-  assert.match(errors, /"needs" must be a list of web, shell/);
-});
-
-test('approving records the guides; editing one later blocks the pipeline until it is reviewed again', async () => {
-  const { reviewDraft, listPipelines, loadPipeline, ROLES_DIR, DRAFTS_DIR, PIPELINES_DIR } = await import('../src/pipeline/schema');
-  const { writeFileSync, unlinkSync, existsSync } = await import('node:fs');
-  const id = 'guide-lock-test';
-  const guide = join(ROLES_DIR, `${id}.md`);
-  const def = clone(read('standard'));
-  def.id = id;
-  def.steps.splice(5, 0, { type: 'agent', id: 'helper', name: 'Helper', purpose: 'Helps.', instructions: `guide:${id}`, reads: [], mayWrite: ['.devcrew/helper.md'], produces: [] });
-  try {
-    writeFileSync(guide, '# Helper\n\nWrite a short note.\n');
-    writeFileSync(join(DRAFTS_DIR, `${id}.json`), JSON.stringify(def));
-    reviewDraft(id, 'approve');
-    const approved = JSON.parse(readFileSync(join(PIPELINES_DIR, `${id}.json`), 'utf8')) as PipelineDef;
-    assert.ok(approved.guideHashes?.[id]);
-    assert.equal(loadPipeline(id).id, id);
-
-    writeFileSync(guide, '# Helper\n\nWrite a long note and change some files.\n');
-    assert.throws(() => loadPipeline(id), /changed since this pipeline was approved/);
-    assert.match(listPipelines().find(p => p.id === id && !p.draft)!.errors.join('\n'), /changed since this pipeline was approved/);
-  } finally {
-    for (const f of [guide, join(PIPELINES_DIR, `${id}.json`), join(DRAFTS_DIR, `${id}.json`), join(DRAFTS_DIR, `${id}.review.json`)]) {
-      if (existsSync(f)) unlinkSync(f);
-    }
-  }
-});
-
 test('a run is refused when a role needs something its agent cannot do', async () => {
   const { checkCapabilities } = await import('../src/orchestrator/runtime');
   const cfg = {
@@ -165,47 +178,4 @@ test('a run is refused when a role needs something its agent cannot do', async (
   assert.deepEqual(checkCapabilities(cfg, 'mixed', def), { errors: [], warnings: [] });
   assert.match(checkCapabilities(cfg, 'other', def).warnings.join(), /does not say whether it can/);
   assert.deepEqual(checkCapabilities(cfg, 'fake', def).errors, []);
-});
-
-test('built-in steps can add a role guide; a missing guide is a problem', () => {
-  const base = JSON.parse(JSON.stringify(read('minimal')));
-  const withGuide = { ...base, id: 'guided', steps: base.steps.map((s: { type: string }) => (s.type === 'qa' ? { ...s, guide: 'guide:test-engineer' } : s)) };
-  assert.deepEqual(validatePipeline(withGuide), []);
-  assert.deepEqual(guidesOf(withGuide), ['test-engineer']);
-  const qa = withGuides(withGuide).steps.find(s => s.type === 'qa') as { guideText?: string };
-  assert.match(qa.guideText ?? '', /^# Test engineer/);
-  const missing = { ...withGuide, steps: withGuide.steps.map((s: { type: string }) => (s.type === 'qa' ? { ...s, guide: 'guide:no-such-guide' } : s)) };
-  assert.match(validatePipeline(missing).join(' '), /no role guide pipelines\/roles\/no-such-guide\.md/);
-});
-
-test('a fast pipeline opens with a blind QA and the build, and has no planner', () => {
-  const fast = loadPipeline('fast');
-  assert.deepEqual(validatePipeline(fast), []);
-  const withPlanner = { ...fast, steps: [{ type: 'planner', id: 'planner' }, ...fast.steps] };
-  assert.ok(validatePipeline(withPlanner).some(e => /no "planner" step/.test(e)));
-  const seeing = { ...fast, steps: fast.steps.map(s => (s.type === 'qa' ? { ...s, blind: false } : s)) };
-  assert.ok(validatePipeline(seeing).some(e => /must be blind/.test(e)));
-  const swapped = { ...fast, steps: [fast.steps[1], fast.steps[0], ...fast.steps.slice(2)] };
-  assert.ok(validatePipeline(swapped).some(e => /before "qa"/i.test(e)));
-  // An Architect may open it, followed by the gate where you approve its design
-  const arch = loadPipeline('fast-arch');
-  assert.deepEqual(validatePipeline(arch), []);
-  const noGate = { ...arch, steps: arch.steps.filter(s => s.id !== 'gate_arch') };
-  assert.ok(validatePipeline(noGate).some(e => /architect step .* only a gate/.test(e)));
-  const inStandard = read('standard');
-  const withArchitect = { ...inStandard, steps: [...inStandard.steps.slice(0, -1), { ...arch.steps[0], id: 'arch2' }, inStandard.steps.at(-1)!] };
-  assert.ok(validatePipeline(withArchitect).some(e => /belongs in a fast pipeline/.test(e)));
-});
-
-test('add-ons attach to a fast pipeline: research roles first, reviewers after the build, writers last', () => {
-  const def = composePipeline(loadPipeline('fast-arch'), ['codebase', 'security', 'docs']);
-  assert.deepEqual(def.steps.map(s => s.id), ['codebase', 'architect', 'gate_arch', 'qa', 'build', 'security', 'reviewer', 'docs', 'gate_merge']);
-  assert.deepEqual(def.addons, ['codebase', 'security', 'docs']);
-  assert.match(def.name, /\+ Codebase analyst \+ Security review \+ Usage docs$/);
-  assert.throws(() => composePipeline(read('standard'), ['docs']), /attach to fast pipelines/);
-  assert.throws(() => composePipeline(loadPipeline('fast'), ['nope']), /No add-on "nope"/);
-  // Before QA there is room for research only, never for a role that writes code
-  const fast = loadPipeline('fast');
-  const coder = { type: 'agent' as const, id: 'early', name: 'Early', purpose: 'Writes code early.', instructions: 'Write all of the code before anyone else starts.', reads: [], mayWrite: ['src/'], produces: [] };
-  assert.ok(validatePipeline({ ...fast, steps: [coder, ...fast.steps] }).some(e => /research roles/.test(e)));
 });

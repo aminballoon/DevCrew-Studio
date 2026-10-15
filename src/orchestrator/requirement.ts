@@ -1,6 +1,6 @@
 /**
  * The customer's requirement split into numbered clauses (R-1, R-2, ...), so every role can be
- * held to the original words instead of only the Planner's restatement of them.
+ * held to the original words.
  *
  * A clause is a sentence of a paragraph or bullet, one data row of a table, or a
  * whole fenced code block. Headings are context, not clauses.

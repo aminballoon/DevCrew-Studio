@@ -7,9 +7,9 @@ import { isAbsolute, relative, resolve, sep } from 'node:path';
 export interface Scope { write: string[]; deny: string[] }
 
 export const ROLE_SCOPES: Record<string, Scope> = {
-  planner: { write: ['.devcrew/', 'contracts/'], deny: [] },
-  qa: { write: ['tests/', 'acceptance/'], deny: [] },
-  dev: { write: ['*'], deny: ['tests/', 'acceptance/', 'contracts/', '.devcrew/'] },
+  // The Builder writes everything except QA's hidden tests (and, in fast-arch, the architecture: see graph.ts)
+  dev: { write: ['*'], deny: ['acceptance/', '.devcrew/acceptance.json'] },
+  qa: { write: ['acceptance/', '.devcrew/acceptance.json'], deny: [] },
   reviewer: { write: ['.devcrew/review.md'], deny: [] },
   single: { write: ['*'], deny: [] },
 };

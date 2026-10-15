@@ -1,7 +1,6 @@
 import type { Role } from '../core/events';
 import type { VerifyResult } from '../guard/verify';
 import { SYSTEM_DIAGRAM, type AgentStep } from '../pipeline/schema';
-import { filesFor, type Plan, type PlanModule } from './plan';
 import { clauseList, type Clause } from './requirement';
 import { SYSTEM_FORMAT } from './system';
 import { TEST_FORMATS } from '../guard/testFormats';
@@ -9,38 +8,6 @@ import { TEST_FORMATS } from '../guard/testFormats';
 /** First line of every prompt. Real agents ignore it; the scripted fake agent routes on it. */
 const header = (role: Role, module = '-', attempt = 1) => `[devcrew role=${role} module=${module} attempt=${attempt}]`;
 
-/** Reports written by roles that ran earlier in the pipeline, for the next role to read. */
-const earlierReports = (paths: string[]) => (paths.length
-  ? `\nEarlier roles in this run wrote reports and notes here; read them first and build on them:\n${paths.map(p => `- ${p}`).join('\n')}\n`
-  : '');
-
-const PLAN_SCHEMA = `{
-  "modules": [
-    { "id": "kebab-case-id", "title": "Short title", "description": "What to build, which files, which acceptance criteria it covers" }
-  ],
-  "testCommand": "command that runs the whole test suite, e.g. node --test",
-  "moduleTestCommand": "same command with {module} where the module id goes, e.g. node --test \\"tests/{module}/**/*.test.*\\"",
-  "checks": [ { "name": "typecheck", "command": "npx tsc --noEmit" } ],
-  "testFormats": ["optional: what the test command prints, from ${TEST_FORMATS.join(', ')}; list several only when one command runs several tools"],
-  "coverage": { "R-1": ["AC-1"], "R-2": ["AC-2", "AC-3"] },
-  "architecture": {
-    "files": [
-      {
-        "path": "src/cart.ts",
-        "kind": "contract | source | test | config | doc",
-        "modules": ["module ids this file belongs to; empty if shared by all"],
-        "purpose": "One plain sentence: what this file is responsible for",
-        "exports": ["Names other files use: classes, functions, types, endpoints"],
-        "dependsOn": ["paths of other planned files this one imports or implements"]
-      }
-    ]
-  }
-}`;
-
-/**
- * Files an earlier role wrote, pasted into the prompt. The agent would read them anyway, and every
- * tool call re-reads the whole conversation: on L-02 QA and Dev spent 4-7 calls each just reading.
- */
 export function filesBlock(files: [string, string][]): string {
   return files.length
     ? `\nTheir current content, so you do not need to read them again:\n${files.map(([path, text]) => `=== ${path} ===\n${text.trimEnd()}`).join('\n\n')}\n=== end of files ===\n`
@@ -50,82 +17,16 @@ export function filesBlock(files: [string, string][]): string {
 /** A role guide on top of a built-in role's instructions: the specialist's techniques and tools. */
 const roleGuide = (text?: string) => (text ? `\nYour role guide. Follow it; it is how this team expects your role to work:\n"""\n${text}\n"""\n` : '');
 
-/** The customer's own words, for roles after the Planner: they win over any restatement. */
+/** The customer's own words: they win over any restatement. */
 function sourceOfTruth(requirement: string, clauses: Clause[]): string {
-  return `The customer's requirement, split into numbered clauses. It is the source of truth: where .devcrew/PRD.md says less or something different, follow the requirement.
+  return `The customer's requirement, split into numbered clauses. It is the source of truth.
 """
 ${clauses.length ? clauseList(clauses) : requirement}
 """
 `;
 }
 
-export function plannerPrompt(requirement: string, feedback: string | null, earlier: string[] = [], clauses: Clause[] = [], guide?: string): string {
-  return `${header('planner')}
-You are the Planner (Product Owner + Architect) of a software team. You do not write application code or tests.
-
-Requirement from the customer:
-"""
-${requirement}
-"""
-
-${earlierReports(earlier)}
-First look at the existing files in this workspace. Only if it already has source code (more than a README), write .devcrew/adr/0000-existing-architecture.md describing it before designing anything new.
-
-Write these files (and only files under .devcrew/ and contracts/):
-1. .devcrew/PRD.md — goal, out of scope, and numbered Acceptance Criteria (AC-1, AC-2, ...) that are concrete and testable. Keep it short: one criterion per rule the requirement states, in the requirement's own words where possible; no user stories, no restating of the requirement, nothing the requirement does not ask for. Every word you write is read again by QA, the developer and the reviewers.
-2. contracts/ — machine-checkable contracts the code must satisfy: exported function signatures as a .d.ts file, an OpenAPI file for HTTP APIs, or SQL migrations for databases. Use whichever fit.
-3. .devcrew/plan.json — exactly this shape:
-${PLAN_SCHEMA}
-   Use as few modules as the work needs, in dependency order. Every module costs a separate build-and-test cycle, so one module is right for most requirements; split only parts that are large and can be tested on their own, and never more than 4. Tests for module X will live in tests/X/; choose test file names and commands the project's test tool really finds there (PlatformIO, for example, only collects suite folders named test_*, so use tests/X/test_X/ with test_dir = tests and the filter X/*).
-   Contracts are read-only for the developer. In C or C++, do not put a class whose private members the developer must add in a contract header: use free functions, an abstract interface, or a class holding only a pointer to an implementation struct the developer defines in src/.
-   Use the project's own language and test tool. DevCrew reads the results of node:test, jest, vitest, pytest, cargo test, ctest, GoogleTest, Unity, go test -v, any TAP output, and firmware "HIL:PASS/HIL:FAIL/HIL:DONE" lines; the test command must print one of them. Test cases are counted in tests/ by language: test()/it() in JS/TS, def test_ in Python, TEST()/RUN_TEST()/void test_ in C/C++, #[test] in Rust, func Test in *_test.go.
-   The architecture must list EVERY file the run will create or change (contracts, source, tests, config), each with a clear purpose a non-programmer can follow. The approver reviews it as a diagram before any code is written, and files outside it will be flagged.
-${clauses.length ? `   "coverage" maps EVERY requirement clause below to the acceptance criteria that cover it. Each clause must be covered in full, word for word: if a clause says two things (for example "is trimmed and must be 1 to 100 characters"), the criteria must say both. A plan with an uncovered clause is sent back to you.
-${clauseList(clauses).split('\n').map(l => `   ${l}`).join('\n')}
-` : ''}${roleGuide(guide)}${feedback ? `\nThe approver sent this feedback on your previous plan. Address all of it:\n"""\n${feedback}\n"""\n` : ''}
-DevCrew checks plan.json (shape, coverage, architecture) as soon as you finish and sends any problem back to you, so do not write scripts or run commands to check it yourself.
-End with a short summary of the plan.`;
-}
-
-export function qaPrompt(plan: Plan, earlier: string[] = [], requirement = '', clauses: Clause[] = [], guide?: string, opts: { blind?: boolean; files?: [string, string][] } = {}): string {
-  return `${header('qa')}
-You are the QA engineer. Work from .devcrew/PRD.md and contracts/. The developer has not written any code yet.
-${filesBlock(opts.files ?? [])}${earlierReports(earlier)}
-${requirement ? `${sourceOfTruth(requirement, clauses)}${plan.coverage ? `The Planner mapped the clauses to acceptance criteria in .devcrew/plan.json ("coverage").\n` : ''}
-Write automated tests that check every requirement clause and every Acceptance Criterion against the contracts, for these modules:` : 'Write automated tests that check every Acceptance Criterion against the contracts, for these modules:'}
-${plan.modules.map(m => `- ${m.id}: ${m.title}`).join('\n')}
-
-Planned test files (create exactly these):
-${plan.architecture.filter(f => f.kind === 'test').map(f => `- ${f.path}: ${f.purpose}`).join('\n') || '- (none listed; use tests/<module>/main.test.ts)'}
-
-Rules:
-- Put the tests of module X in tests/X/ (for example tests/${plan.modules[0]?.id ?? 'module'}/main.test.ts). Only write files under tests/.
-- Import the code under test from the paths the contracts define, even though they do not exist yet.
-- Cover edge cases and error paths, not only the happy path. Name each test after the AC it checks${requirement ? ' and the requirement clause (R-n)' : ''}.
-- Do not use skip, todo or only.
-- The suite will be run with: ${plan.testCommand}
-- Keep the suite lean: it is run on every attempt and maintained by every later change. Aim for about one test per acceptance criterion, and add boundary, hostile-input or concurrency cases only where a clause states a limit, an error or a security property. Assert every exact example the requirement gives (an input and its output). Prefer one test with several related assertions over many tiny tests, and reuse the helpers already in tests/.
-- When tests/ already has tests, they cover what the project does today. Write tests only for what this change adds or changes, and update the existing tests this change makes wrong. Do not rewrite or duplicate the others.
-- Every test must agree with the requirement and with every other test.
-${QA_SCOPE}
-
-${opts.blind ? `${BLIND_QA}\n` : ''}${roleGuide(guide)}
-After you finish, these files are locked: the developer cannot change them.
-End with a list of the test files and which ACs ${requirement ? 'and requirement clauses ' : ''}each covers.`;
-}
-
-/**
- * What QA's turn is for, and what it is not. Without this, QA turns took 15-33 min of a 60-min
- * HW-01 run: on-board suites run against an empty firmware, reference models with mutants,
- * and debugging of tools outside tests/.
- */
-const QA_SCOPE = `Your job is writing the tests, not running the project. Keep your turn short:
-- Check your work with a quick run only: run the host-side tests once against the empty implementation, where they should fail to compile, fail to import or fail their assertions, and read the failures to check each test fails for the reason you intend. One run, a few minutes at most.
-- Do not run tests that need hardware, a board, a network service or a long wait, and do not flash or upload anything. Check those test files only for syntax (for example python -m py_compile). The Verify step runs them after the developer has built the code.
-- Do not write a reference implementation, mutants or a model of the code to test your tests, and do not write notes or memory files outside tests/.
-- If a tool, script or setting outside tests/ is broken or missing, do not investigate or fix it. Write the tests as if it worked, and add a line starting with "HARNESS_ISSUE:" to your final answer naming the file and the problem. Leave the line out when nothing is broken.`;
-
-// --- Fast pipeline: one Builder, and a blind QA working at the same time ---
+// --- The build: one Builder, and a blind QA working at the same time ---
 
 /** Where the Builder says how to run its own tests, and QA how to run the hidden ones. */
 export const BUILDER_TESTS = '.devcrew/test.json';
@@ -208,33 +109,6 @@ Fix the code so it does what the requirement says. You cannot see the hidden tes
 Keep ${BUILDER_TESTS} up to date. End with a short summary of what you changed.`;
 }
 
-/** Blind QA: the real tests are written for the judge, not for the developer. */
-const BLIND_QA = `Blind QA: the developer will not see most of your tests.
-- Write the acceptance tests, the real check of every clause and criterion, under acceptance/<module>/ (for example acceptance/X/main.test.ts), mirroring the planned test files. They are taken away before the developer starts and only run when the work is judged. The developer then sees only the names and failure messages of failing tests, so name each test after the behaviour it checks (AC-n, R-n and what must happen), and give assertions clear messages.
-- Under tests/<module>/ write only a small contract test (one to three tests): the module's exports exist and one basic call works. It shows the developer the shape of the API, not the rules.
-- Acceptance tests run with the test command, with tests/ replaced by acceptance/. Import code and shared helpers with paths that work from acceptance/<module>/.`;
-
-export function devPrompt(plan: Plan, module: PlanModule, attempt: number, last: VerifyResult | null, feedback: string | null, earlier: string[] = [], requirement = '', clauses: Clause[] = [], guide?: string, opts: { blind?: boolean; files?: [string, string][] } = {}): string {
-  const failure = attempt > 1 && last && !last.passed
-    ? `\nYour previous attempt did not pass verification:\n${last.reasons.map(r => `- ${r}`).join('\n')}\n\nTest output (tail):\n\`\`\`\n${last.output.slice(-4000)}\n\`\`\`\nFix the code. The tests are correct by definition here; do not try to change them.\n`
-    : '';
-  return `${header('dev', module.id, attempt)}
-You are the Developer. Implement module "${module.id}": ${module.title}
-${module.description}
-
-Work from .devcrew/PRD.md, contracts/ and the tests in tests/${module.id}/.${filesBlock(opts.files ?? [])}${opts.blind ? '\nMost of QA\'s tests are kept from you and run when your work is judged. Build what the requirement clauses and the PRD say, not only what tests/ shows. When a hidden test fails you see its name and failure message: fix the behaviour it names. You cannot read hidden tests and must not look for them. If you are sure a hidden test is wrong, start a line with "SPEC_ISSUE:" naming the test and why; QA will check it.' : ''}
-${earlierReports(earlier)}${requirement ? `\n${sourceOfTruth(requirement, clauses)}Passing the tests is necessary but not enough: the code must also do everything the clauses for this module say.\n` : ''}
-Planned files for this module (stick to this architecture; mention any file you had to add and why):
-${filesFor(plan, module.id, ['source', 'config']).map(f => `- ${f.path}: ${f.purpose}${f.exports.length ? ` Exports: ${f.exports.join(', ')}.` : ''}${f.dependsOn.length ? ` Uses: ${f.dependsOn.join(', ')}.` : ''}`).join('\n') || '- (none listed)'}
-Rules:
-- tests/, contracts/ and .devcrew/ are read-only for you. Changes there are reverted automatically.
-- Make the tests pass by implementing the behaviour, never by special-casing test inputs.
-- You may run the tests yourself: ${plan.moduleTestCommand?.replace('{module}', module.id) ?? plan.testCommand}
-- If a test contradicts the requirement or another test, or the spec or contracts are impossible to implement, stop and reply with a line starting with "SPEC_ISSUE:" naming the test (file and line) or the part of the spec, and why. A wrong test goes back to QA to check; a wrong spec goes back to the Planner.
-${roleGuide(guide)}${failure}${feedback ? `\nRead this before you start:\n"""\n${feedback}\n"""\n` : ''}
-End with a short summary of what you changed.`;
-}
-
 /** Any reviewer that can send work back: a gap against the requirement is never optional. */
 export const REQUIREMENT_RULE = 'Check every requirement clause against the code. Code that does not do what a clause says is a must-fix finding whatever its severity: answer "VERDICT: changes" for it and name the clause (R-n).';
 
@@ -242,7 +116,7 @@ export function reviewerPrompt(baseCommit: string, requirement = '', clauses: Cl
   return `${header('reviewer')}
 You are the code reviewer. The tests already pass; your job is what tests cannot see.
 ${requirement ? `\n${sourceOfTruth(requirement, clauses)}${REQUIREMENT_RULE}\n` : ''}
-Review the changes${diff ? ' (the full diff is below; read other files only where you need more context)' : ` with \`git diff ${baseCommit}\``} against .devcrew/PRD.md, contracts/ and any ADRs in .devcrew/adr/, where they exist.${diff ? `\n\`\`\`diff\n${diff}\n\`\`\`` : ''}
+Review the changes${diff ? ' (the full diff is below; read other files only where you need more context)' : ` with \`git diff ${baseCommit}\``} against contracts/, .devcrew/ARCHITECTURE.md and any ADRs, where they exist.${diff ? `\n\`\`\`diff\n${diff}\n\`\`\`` : ''}
 Look for: design problems, duplication, unclear names, missing error handling, security issues, and acceptance criteria that are tested only weakly.
 ${hiddenTests ? `acceptance/ holds QA's hidden acceptance tests: Verify ran all of them and they pass, and the developer never sees them, so do not ask for changes there or for wiring them into the test script.\n` : ''}
 Write your review to .devcrew/review.md (the only file you may write). Its first line must be exactly
@@ -318,18 +192,18 @@ ${opts.feedback ? `\nThis is round ${opts.round}. Since your last review the dev
 End with a short summary.`;
 }
 
-/** QA checks a test the developer says cannot be passed, instead of re-planning the whole run. */
-export function qaDisputePrompt(module: PlanModule, issue: string, last: VerifyResult | null, requirement: string, clauses: Clause[]): string {
-  return `${header('qa', module.id)}
-You are the QA engineer. The developer of module "${module.id}" says your tests cannot be passed:
+/** QA checks a hidden test the Builder says cannot be passed. */
+export function qaDisputePrompt(issue: string, last: VerifyResult | null, requirement: string, clauses: Clause[]): string {
+  return `${header('qa', 'main')}
+You are the QA engineer. The Builder cannot see your hidden tests in acceptance/ and says they cannot be passed:
 """
 ${issue}
 """
 ${last ? `\nLast test run (tail):\n\`\`\`\n${last.output.slice(-3000)}\n\`\`\`\n` : ''}
 ${sourceOfTruth(requirement, clauses)}
 Check the disputed tests against the requirement clauses and against each other.
-- If a test is wrong, fix it (only files under tests/ or acceptance/) so it checks what the clauses say. Keep the change small; do not rewrite other tests.
-- If the tests are right, change nothing and explain in one or two sentences why, so the developer can make them pass.
-- If the requirement or the plan itself is contradictory, reply with a line starting with "PLAN_ISSUE:" explaining it; the Planner will revise the plan.
-End with one line starting with "QA_ANSWER:" that tells the developer what you decided.`;
+- If a test is wrong, fix it (only files under acceptance/) so it checks what the clauses say. Keep the change small; do not rewrite other tests.
+- If the tests are right, change nothing and explain in one or two sentences why, without quoting the tests, so the Builder can make them pass.
+- If the requirement itself is contradictory, reply with a line starting with "REQUIREMENT_ISSUE:" explaining it; a person decides.
+End with one line starting with "QA_ANSWER:" that tells the Builder what you decided.`;
 }

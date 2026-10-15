@@ -54,7 +54,6 @@ const LABELS: Record<string, { label: string; style: number }> = {
   approve: { label: 'Approve', style: 3 },
   revise: { label: 'Revise', style: 1 },
   retry: { label: 'Retry', style: 1 },
-  replan: { label: 'Replan', style: 2 },
   abort: { label: 'Abort', style: 4 },
 };
 const button = (tag: string, id: string, d: string, label?: string) =>
@@ -108,7 +107,7 @@ export function handleMessage(m: any, allowed: string[], host: GateHost): unknow
   if (!waiting.includes(runId)) { return { content: `Run \`${runId}\` is not waiting at a gate any more.` }; }
   const id = randomUUID().slice(0, 8);
   comments.set(id, { runId, text });
-  // Escalations take retry/replan, plan and code gates take approve/revise; a note goes with any of them
+  // Escalations take retry, the other gates approve/revise; a note goes with any of them
   const decisions = host.decisionsOf(runId);
   return {
     content: `Your comment on run \`${runId}\`:\n> ${text.slice(0, 1500).replace(/\n/g, '\n> ')}\nSend it as:`,
@@ -137,7 +136,7 @@ export async function handleInteraction(i: any, allowed: string[], host: GateHos
   } else if (i.type === 3) {
     // Every answer opens a form with a text box: an agent's question needs a typed answer, and a note can go with any decision
     const needs = decision === 'revise';
-    const label = { revise: 'What should change?', approve: 'Note for the next step (optional)', retry: 'Hint for Dev (optional)', replan: 'What the Planner should change (optional)', abort: 'Why stop? (optional)' }[decision] ?? 'Note (optional)';
+    const label = { revise: 'What should change?', approve: 'Note for the next step (optional)', retry: 'Hint for the Builder (optional)', abort: 'Why stop? (optional)' }[decision] ?? 'Note (optional)';
     return {
       type: 9,
       data: {

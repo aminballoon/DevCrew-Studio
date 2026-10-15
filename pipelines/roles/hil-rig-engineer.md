@@ -19,7 +19,7 @@ Whichever the requirement or the user's setup uses:
 | `flash.sh <firmware file>` | Programs and verifies, with openocd, st-flash, STM32_Programmer_CLI, pyocd or dfu-util as the board needs |
 | `monitor.sh <seconds>` | Resets the board and captures its serial output for that long to stdout |
 | `run.sh <firmware file> <seconds>` | Takes the board's lock, probes, flashes, captures the serial output, releases the lock and returns the log |
-| `RIG.md` | The setup in plain words, what the user must connect or install, and a section "For the Planner and QA" with the exact commands tests should call |
+| `RIG.md` | The setup in plain words, what the user must connect or install, and a section "For QA and the Builder" with the exact commands tests should call |
 
 ## One board, one run at a time
 The lock is exclusive per board: `flock` on a lock file named after the probe serial, with a

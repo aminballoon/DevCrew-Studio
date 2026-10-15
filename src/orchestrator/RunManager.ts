@@ -296,7 +296,7 @@ function stepLabel(def: PipelineDef, node: string): string {
   const step = def.steps.find(s => s.id === node);
   if (step?.type === 'agent') { return step.name; }
   if (step?.type === 'gate') { return step.title; }
-  return { planner: 'Planner', qa: 'QA', dev: 'Dev', verify: 'Verify', escalate: 'Escalation', finish: 'Finish' }[node] ?? node;
+  return { qa: 'QA and Builder', dev: 'Builder', verify: 'Verify', dispute: 'QA checks a test', escalate: 'Escalation', finish: 'Finish' }[node] ?? node;
 }
 
 function checked(def: PipelineDef): PipelineDef {

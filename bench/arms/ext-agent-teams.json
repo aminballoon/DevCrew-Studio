@@ -1,1 +1,18 @@
-{"id":"ext-agent-teams","mode":"external","workflow":"agent-teams","model":"claude-haiku-5-5","profile":"external","name":"Outside: agent-teams","role":"control"}
+{
+  "id": "ext-agent-teams",
+  "code": "T",
+  "name": "Claude Code agent teams",
+  "summary": "Anthropic's own multi-agent mode: a lead spawns three teammates who share a task list and message each other. Nothing from DevCrew takes part.",
+  "agents": 4,
+  "steps": [
+    "Lead splits the task",
+    "Three teammates build and test in parallel",
+    "Lead checks the whole test suite"
+  ],
+  "role": "control",
+  "color": "#d946ef",
+  "mode": "external",
+  "workflow": "agent-teams",
+  "model": "claude-haiku-5-5",
+  "profile": "external"
+}

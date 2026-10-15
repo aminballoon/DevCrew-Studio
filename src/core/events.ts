@@ -3,7 +3,7 @@ import { dirname } from 'node:path';
 
 import type { PipelineDef } from '../pipeline/schema';
 
-/** Built-in roles are planner, qa, dev, reviewer and single; pipelines can add their own. */
+/** Built-in roles are qa, dev (the Builder), reviewer, architect and single; pipelines can add their own. */
 export type Role = string;
 /** A gate step's id, or "escalation". Runs made before pipelines used "spec" and "merge". */
 export type GateId = string;

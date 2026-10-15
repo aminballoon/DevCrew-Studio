@@ -126,24 +126,6 @@
         "FAKE_SCRIPT": "agents/scripts/cart.mjs"
       }
     },
-    "fake-expenses": {
-      "command": "node",
-      "args": [
-        "agents/fake-agent.mjs"
-      ],
-      "env": {
-        "FAKE_SCRIPT": "agents/scripts/expenses.mjs"
-      }
-    },
-    "fake-trouble": {
-      "command": "node",
-      "args": [
-        "agents/fake-agent.mjs"
-      ],
-      "env": {
-        "FAKE_SCRIPT": "agents/scripts/cart-trouble.mjs"
-      }
-    },
     "fake-crash": {
       "command": "node",
       "args": [
@@ -153,78 +135,48 @@
         "FAKE_SCRIPT": "agents/scripts/cart-crash.mjs"
       }
     },
-    "fake-dispute": {
-      "command": "node",
-      "args": [
-        "agents/fake-agent.mjs"
-      ],
-      "env": {
-        "FAKE_SCRIPT": "agents/scripts/cart-dispute.mjs"
-      }
-    },
-    "fake-conflict": {
-      "command": "node",
-      "args": [
-        "agents/fake-agent.mjs"
-      ],
-      "env": {
-        "FAKE_SCRIPT": "agents/scripts/cart-conflict.mjs"
-      }
-    },
-    "fake-blind": {
-      "command": "node",
-      "args": [
-        "agents/fake-agent.mjs"
-      ],
-      "env": {
-        "FAKE_SCRIPT": "agents/scripts/cart-blind.mjs"
-      }
-    },
-    "fake-blind-wrong": {
-      "command": "node",
-      "args": [
-        "agents/fake-agent.mjs"
-      ],
-      "env": {
-        "FAKE_SCRIPT": "agents/scripts/cart-blind-wrong.mjs"
-      }
-    },
-    "fake-fast": {
-      "command": "node",
-      "args": [
-        "agents/fake-agent.mjs"
-      ],
-      "env": {
-        "FAKE_SCRIPT": "agents/scripts/cart-fast.mjs"
-      }
-    },
     "fake-archchange": {
       "command": "node",
       "args": [
         "agents/fake-agent.mjs"
       ],
       "env": {
-        "FAKE_SCRIPT": "agents/scripts/cart-fast-archchange.mjs"
+        "FAKE_SCRIPT": "agents/scripts/cart-archchange.mjs"
+      }
+    },
+    "fake-wrongtest": {
+      "command": "node",
+      "args": [
+        "agents/fake-agent.mjs"
+      ],
+      "env": {
+        "FAKE_SCRIPT": "agents/scripts/cart-wrongtest.mjs"
+      }
+    },
+    "fake-design": {
+      "command": "node",
+      "args": [
+        "agents/fake-agent.mjs"
+      ],
+      "env": {
+        "FAKE_SCRIPT": "agents/scripts/design.mjs"
       }
     }
   },
   "profiles": {
     "claude": {
-      "planner": "claude",
       "qa": "claude",
       "dev": "claude",
       "reviewer": "claude",
       "single": "claude"
     },
     "claude-isolated": {
-      "planner": "claude-isolated",
       "qa": "claude-isolated",
       "dev": "claude-isolated",
       "reviewer": "claude-isolated",
       "single": "claude-isolated"
     },
     "claude-sonnet": {
-      "planner": "claude-sonnet",
       "qa": "claude-sonnet",
       "dev": "claude-sonnet",
       "reviewer": "claude-sonnet",
@@ -232,7 +184,6 @@
       "single": "claude-sonnet"
     },
     "claude-haiku": {
-      "planner": "claude-haiku",
       "qa": "claude-haiku",
       "dev": "claude-haiku",
       "reviewer": "claude-haiku",
@@ -241,14 +192,12 @@
       "architect": "claude-sonnet"
     },
     "cross-vendor": {
-      "planner": "claude",
       "qa": "codex",
       "dev": "claude",
       "reviewer": "codex",
       "single": "claude"
     },
     "agy": {
-      "planner": "agy",
       "qa": "agy",
       "dev": "agy",
       "reviewer": "agy",
@@ -256,76 +205,39 @@
       "single": "agy"
     },
     "fake": {
-      "planner": "fake",
       "qa": "fake",
       "dev": "fake",
       "reviewer": "fake",
-      "single": "fake"
-    },
-    "fake-expenses": {
-      "planner": "fake-expenses",
-      "qa": "fake-expenses",
-      "dev": "fake-expenses",
-      "reviewer": "fake-expenses",
-      "single": "fake-expenses"
-    },
-    "fake-trouble": {
-      "planner": "fake-trouble",
-      "qa": "fake-trouble",
-      "dev": "fake-trouble",
-      "reviewer": "fake-trouble",
-      "single": "fake-trouble"
+      "single": "fake",
+      "architect": "fake"
     },
     "fake-crash": {
-      "planner": "fake-crash",
       "qa": "fake-crash",
       "dev": "fake-crash",
       "reviewer": "fake-crash",
-      "single": "fake-crash"
-    },
-    "fake-dispute": {
-      "planner": "fake-dispute",
-      "qa": "fake-dispute",
-      "dev": "fake-dispute",
-      "reviewer": "fake-dispute",
-      "single": "fake-dispute"
-    },
-    "fake-conflict": {
-      "planner": "fake-conflict",
-      "qa": "fake-conflict",
-      "dev": "fake-conflict",
-      "reviewer": "fake-conflict",
-      "single": "fake-conflict"
-    },
-    "fake-blind": {
-      "planner": "fake-blind",
-      "qa": "fake-blind",
-      "dev": "fake-blind",
-      "reviewer": "fake-blind",
-      "single": "fake-blind"
-    },
-    "fake-blind-wrong": {
-      "planner": "fake-blind-wrong",
-      "qa": "fake-blind-wrong",
-      "dev": "fake-blind-wrong",
-      "reviewer": "fake-blind-wrong",
-      "single": "fake-blind-wrong"
-    },
-    "fake-fast": {
-      "planner": "fake-fast",
-      "qa": "fake-fast",
-      "dev": "fake-fast",
-      "reviewer": "fake-fast",
-      "single": "fake-fast",
-      "architect": "fake-fast"
+      "single": "fake-crash",
+      "architect": "fake-crash"
     },
     "fake-archchange": {
-      "planner": "fake-archchange",
       "qa": "fake-archchange",
       "dev": "fake-archchange",
       "reviewer": "fake-archchange",
       "single": "fake-archchange",
       "architect": "fake-archchange"
+    },
+    "fake-wrongtest": {
+      "qa": "fake-wrongtest",
+      "dev": "fake-wrongtest",
+      "reviewer": "fake-wrongtest",
+      "single": "fake-wrongtest",
+      "architect": "fake-wrongtest"
+    },
+    "fake-design": {
+      "qa": "fake-design",
+      "dev": "fake-design",
+      "reviewer": "fake-design",
+      "single": "fake-design",
+      "architect": "fake-design"
     }
   },
   "defaultProfile": "claude",
@@ -335,18 +247,11 @@
     "claude": "Real Claude Code agents. Uses your subscription quota.",
     "cross-vendor": "Real agents: Claude plans and builds, Codex writes tests and reviews. Uses both quotas.",
     "fake": "Demo, no quota. Small shopping-cart project (4 files). Use project folder bench/tasks/S-01-cart/seed.",
-    "fake-expenses": "Demo, no quota. Medium expense-splitter project (3 parts, 9 files). Ask for changes at Gate 1 to see the Planner send a second version of the architecture. Use project folder bench/tasks/M-01-expenses/seed.",
-    "fake-trouble": "Demo, no quota. Things go wrong: Dev never fixes its bug, tries to edit tests and adds a file outside the design, so the run stops for your decision. Use project folder bench/tasks/S-01-cart/seed.",
     "claude-isolated": "Real Claude Code agents without your personal skills, plugins and CLAUDE.md. Use it for benchmarks against other vendors. Uses your subscription quota.",
     "agy": "Real Antigravity agents (Gemini 3.8 Flash High) for every role, including the security step. Uses your Antigravity quota.",
     "fake-crash": "Harness test, no quota. The Planner leaves a background command running and Dev's agent crashes mid-turn, so the run fails and every agent must still be stopped.",
     "claude-sonnet": "Claude Sonnet 5.5 for every role, isolated from your own Claude setup. Used for the evolution benchmark.",
-    "fake-dispute": "Harness test, no quota. QA writes one wrong test; Dev disputes it, QA fixes it, and the run goes on without a new plan.",
-    "fake-conflict": "Harness test, no quota. Dev and QA keep blaming the plan; the run stops after two replans and asks for a human.",
-    "fake-blind": "Harness test, no quota. Blind QA: Dev only sees a contract test; the real tests stay hidden until Verify.",
-    "fake-blind-wrong": "Harness test, no quota. Blind QA with a wrong hidden test: it fails twice, goes back to QA, and QA fixes it.",
     "claude-haiku": "Claude Haiku 5.5 for every role, isolated from your own Claude setup: the smaller, cheaper model. The Architect of a fast-arch pipeline uses Claude Sonnet 5.5: research finds stronger models design and maintain code better, and weak models gain most from a clear design.",
-    "fake-fast": "Demo, no quota, for the fast pipeline. QA writes hidden tests while the Builder builds; the first build misses the discount codes and fixes them from the failing test names. Use project folder bench/tasks/S-01-cart/seed.",
     "fake-archchange": "Harness test, no quota, for fast-arch. The Builder asks for an architecture change; the Architect changes the design, it is approved, and the Builder carries on."
   },
   "$isolatedNote": "claude-isolated copies ANTHROPIC_BASE_URL and the model from ~/.claude/settings.json (it no longer reads that file). Update both here if you change them there.",

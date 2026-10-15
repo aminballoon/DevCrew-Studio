@@ -1,1 +1,18 @@
-{"id":"ext-claude-cli","mode":"external","workflow":"claude-cli","model":"claude-haiku-5-5","profile":"external","name":"Outside: claude-cli","role":"control"}
+{
+  "id": "ext-claude-cli",
+  "code": "X",
+  "name": "Plain Claude Code",
+  "summary": "The same one-AI task, run by Claude Code itself (claude -p) instead of through DevCrew. Checks that the one-AI arm is measured fairly.",
+  "agents": 1,
+  "steps": [
+    "Claude Code gets the task",
+    "Writes code and its own tests",
+    "Stops when it says it is done"
+  ],
+  "role": "control",
+  "color": "#64748b",
+  "mode": "external",
+  "workflow": "claude-cli",
+  "model": "claude-haiku-5-5",
+  "profile": "external"
+}

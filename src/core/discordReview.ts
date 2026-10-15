@@ -1,6 +1,6 @@
 /**
  * What a gate shows on Discord: the review itself, short enough for a phone, with the full
- * documents attached as files (PRD.md, the patch) to open in Discord.
+ * documents attached as files (ARCHITECTURE.md, the patch) to open in Discord.
  */
 
 export interface ReviewEmbed {
@@ -18,39 +18,18 @@ const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` 
 const field = (name: string, lines: string[], inline = false) =>
   ({ name: cut(name, 256), value: cut(lines.filter(Boolean).join('\n') || '-', 1024), inline });
 
-/** "- AC-3 Re-adding a SKU..." lines of a PRD, by id. */
-export function criteria(prd: string): Map<string, string> {
-  const out = new Map<string, string>();
-  for (const m of prd.matchAll(/^\s*[-*]\s*\**(AC-\d+)\**[:.)]?\s*(.+)$/gm)) { out.set(m[1], m[2].trim()); }
-  return out;
-}
-
 type Payload = Record<string, any>;
 
-function planReview(p: Payload): { embeds: ReviewEmbed[]; files: ReviewFile[] } {
-  const prd: string = p.prd ?? '';
-  const acs = criteria(prd);
-  const goal = prd.match(/##\s*Goal\s*\n+([\s\S]*?)(\n##|$)/)?.[1]?.trim() ?? '';
-  const modules: { id: string; title: string }[] = p.plan?.modules ?? [];
-  const coverage: Record<string, string[]> = p.plan?.coverage ?? {};
-  const clauses: { id: string; text: string }[] = p.clauses ?? [];
-  const uncovered = clauses.filter(c => !(coverage[c.id] ?? []).length);
-  const covered = new Set(Object.values(coverage).flat());
-  const extra = [...acs.keys()].filter(id => Object.keys(coverage).length && !covered.has(id));
-
+/** The Architect's design: its modules, the rules between them and the decisions behind them. */
+function architectureReview(p: Payload): { embeds: ReviewEmbed[]; files: ReviewFile[] } {
+  const modules: { id: string; path: string; purpose: string; mayUse: string[] }[] = p.architecture?.modules ?? [];
+  const decisions: { id: string; title: string }[] = p.architecture?.decisions ?? [];
   const fields = [
-    field(`Modules (${modules.length})`, modules.map((m, i) => `${i + 1}. **${m.title}** \`${m.id}\``)),
-    field(`Acceptance criteria (${acs.size})`, [...acs].map(([id, t]) => `**${id}** ${cut(t, 110)}`)),
+    field(`Modules (${modules.length})`, modules.map(m => `**${m.id}** \`${m.path}\` ${cut(m.purpose, 80)}${m.mayUse.length ? ` · uses ${m.mayUse.join(', ')}` : ''}`)),
+    field(`Decisions (${decisions.length})`, decisions.map(d => `**${d.id}** ${cut(d.title, 100)}`)),
   ];
-  if (clauses.length) {
-    fields.push(field('Requirement coverage', [
-      uncovered.length ? `⚠️ Not covered: ${uncovered.map(c => `${c.id} "${cut(c.text, 60)}"`).join(', ')}` : `✅ All ${clauses.length} requirement sentences are covered`,
-      extra.length ? `Added by the Planner (no sentence asks for it): ${extra.join(', ')}` : '',
-    ]));
-  }
-  if (p.specIssue) { fields.push(field('⚠️ Why the plan came back', [String(p.specIssue)])); }
-  const embeds: ReviewEmbed[] = [{ title: p.title, description: cut(goal, 1500), color: uncovered.length || p.specIssue ? AMBER : VIOLET, fields }];
-  return { embeds, files: prd ? [{ name: 'PRD.md', text: prd }] : [] };
+  if (p.architectureError) { fields.push(field('⚠️ The design cannot be enforced', [String(p.architectureError)])); }
+  return { embeds: [{ title: p.title, color: p.architectureError ? AMBER : VIOLET, fields }], files: p.doc ? [{ name: 'ARCHITECTURE.md', text: p.doc }] : [] };
 }
 
 function codeReview(p: Payload): { embeds: ReviewEmbed[]; files: ReviewFile[] } {
@@ -82,7 +61,7 @@ function escalationReview(p: Payload): { embeds: ReviewEmbed[]; files: ReviewFil
       title: p.title,
       color: RED,
       description: cut(`${reasons.map(r => `• ${r}`).join('\n')}\n\n**Last test output**\n\`\`\`\n${output.slice(-1200)}\n\`\`\``, 4000),
-      fields: [field('Your options', ['**Retry**: Dev tries again (your note goes to Dev)', '**Replan**: back to the Planner', '**Abort**: stop the run'])],
+      fields: [field('Your options', ['**Retry**: the Builder tries again (your note goes with it)', '**Abort**: stop the run'])],
     }],
     files: output ? [{ name: 'test-output.txt', text: output }] : [],
   };
@@ -90,7 +69,7 @@ function escalationReview(p: Payload): { embeds: ReviewEmbed[]; files: ReviewFil
 
 /** The review for one gate. Unknown kinds fall back to the title only. */
 export function gateReview(payload: Payload): { embeds: ReviewEmbed[]; files: ReviewFile[] } {
-  if (payload.kind === 'plan') { return planReview(payload); }
+  if (payload.kind === 'architecture') { return architectureReview(payload); }
   if (payload.kind === 'code') { return codeReview(payload); }
   if (payload.kind === 'escalation') { return escalationReview(payload); }
   const reports: { name: string; files: { path: string; text: string }[] }[] = payload.reports ?? [];

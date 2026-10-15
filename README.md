@@ -1,6 +1,6 @@
 # DevCrew Studio
 
-Multi-agent development pipeline (Planner → QA → Dev ⇄ Verify → Reviewer) ที่สั่ง coding agent ผ่าน [ACP](https://agentclientprotocol.com/) มี Human Gate ให้หัวหน้าทีมอนุมัติ และมี benchmark harness ไว้เทียบกับการใช้ agent ตัวเดียว
+Multi-agent development pipeline (QA ∥ Builder → Verify → Reviewer, หรือ AI ตัวเดียว) ที่สั่ง coding agent ผ่าน [ACP](https://agentclientprotocol.com/) มี Human Gate ให้หัวหน้าทีมอนุมัติ และมี benchmark harness ไว้เทียบกับการใช้ agent ตัวเดียว
 
 - แนวคิดและสถาปัตยกรรม: [docs/CONCEPT.md](docs/CONCEPT.md)
 - การออกแบบ benchmark: [docs/BENCHMARK.md](docs/BENCHMARK.md)
@@ -23,20 +23,20 @@ npm run dashboard
 
 `devcrew.config.json` กำหนดว่าแต่ละบทบาทใช้ agent ตัวไหน agent ทุกตัวเป็น ACP adapter ที่ใช้ login ของ CLI ของ vendor นั้นๆ (subscription) ตัวระบบไม่เคยถือ token เอง
 
-| Profile | Planner | QA | Dev | Reviewer |
-|---|---|---|---|---|
-| `claude` | Claude | Claude | Claude | Claude |
-| `cross-vendor` | Claude | Codex | Claude | Codex |
-| `fake` | scripted ([agents/scripts/cart.mjs](agents/scripts/cart.mjs)) | | | |
+| Profile | QA | Builder | Reviewer |
+|---|---|---|---|
+| `claude` | Claude | Claude | Claude |
+| `cross-vendor` | Codex | Claude | Codex |
+| `fake` | scripted ([agents/scripts/cart.mjs](agents/scripts/cart.mjs)) | | |
 
 ## คำสั่ง
 
 | คำสั่ง | ใช้ทำอะไร |
 |---|---|
 | `npm run dashboard` | Dashboard: pipeline สด, Gate, ฟีดกิจกรรม, token ต่อบทบาท, ผล benchmark |
-| `npm run run -- start --requirement <file> [--source <dir>] [--profile fake] [--auto]` | เริ่ม run จาก CLI |
+| `npm run run -- start --requirement <file> [--source <dir>] [--profile fake] [--pipeline single\|fast\|fast-arch] [--addons security,docs] [--auto]` | เริ่ม run จาก CLI |
 | `npm run run -- gate <runId> approve` | ตอบ Gate จาก CLI |
-| `npm run bench -- --tasks S-01-cart --arms single-vanilla,single-process,multi-same --reps 2` | รัน benchmark |
+| `npm run bench -- --tasks S-01-cart --arms single-vanilla,multi-fast,ext-claude-cli --reps 2` | รัน benchmark |
 | `npm run pipeline -- validate <file>` / `list` / `status <id>` / `approve <id>` | Check, list and approve pipeline files (see [pipelines/SCHEMA.md](pipelines/SCHEMA.md)) |
 | Skill `/new-pipeline` | Ask Claude Code to design a pipeline from a plain request; it writes a draft you review in the dashboard's Pipelines tab |
 | `npm run studio` | เปิด graph ใน LangGraph Studio (ใช้ `langgraph.json`) |
@@ -61,8 +61,9 @@ bench/           tasks (hidden tests), arms, runner, results/
 
 - แต่ละบทบาทเขียนได้เฉพาะ path ของตัวเอง (`src/core/scope.ts`) การขอ permission และการเขียนไฟล์ผ่าน ACP ที่อยู่นอกขอบเขตจะถูกปฏิเสธ
 - หลังทุก turn ระบบเทียบ workspace กับ snapshot และ **revert** การแก้ไขนอกขอบเขต รวมถึงการแก้ผ่าน shell ของ agent เอง
-- `tests/` และ `contracts/` ถูกล็อกด้วย hash หลัง QA ส่งมอบ Verify จะตัดสินว่าไม่ผ่านถ้าไฟล์เปลี่ยน, มีเทส fail หรือ skip, หรือจำนวนเทสที่รันได้น้อยกว่าที่ประกาศไว้
-- วนแก้ได้ไม่เกิน `maxFixAttempts` รอบต่อโมดูล เกินแล้วไปที่ Escalation Gate (ถ้าเป็นโหมด benchmark นับเป็น failed)
+- เทสของ QA (`acceptance/`) ถูกเก็บไว้นอก workspace ระหว่างที่ Builder ทำงาน Builder เห็นแค่ชื่อและข้อความของเทสที่ fail Verify จะตัดสินว่าไม่ผ่านถ้ามีเทส fail หรือ skip หรือจำนวนเทสที่รันได้น้อยกว่าที่ประกาศไว้
+- โปรเจกต์ที่มี `.devcrew/architecture.json` (fast-arch) Verify จะตรวจ import ทุกไฟล์ตามกฎของสถาปัตยกรรม
+- วนแก้ได้ไม่เกิน `maxFixAttempts` รอบ เกินแล้วไปที่ Escalation Gate (ถ้าเป็นโหมด benchmark นับเป็น failed)
 
 ## สิ่งที่ยังไม่ได้ทำหรือยังไม่ได้ทดสอบ
 

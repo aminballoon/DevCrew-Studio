@@ -4,20 +4,21 @@ import { join } from 'node:path';
 import { Annotation, END, interrupt, START, StateGraph } from '@langchain/langgraph';
 
 import { runDir } from '../core/config';
+import { ROLE_SCOPES } from '../core/scope';
 import { usageByRole, type GateId } from '../core/events';
 import { entryNode, loadPipeline, SYSTEM_DIAGRAM, type AgentStep, type GateStep, type PipelineDef, type Step } from '../pipeline/schema';
 import { ARCHITECTURE_DOC, ARCHITECTURE_FILE, checkArchitecture, readArchitecture } from '../guard/architecture';
 import { NOT_AUTHORED, takeSnapshot } from '../guard/snapshot';
 import { captureBaseline, countDeclaredTests, verify, type TestBaseline, type VerifyResult } from '../guard/verify';
 import { commitAll, diffSince, prepareWorkspace, type Workspace } from '../guard/workspace';
-import { readPlan, readTestRun, readText, type Plan, type TestRun } from './plan';
-import { ACCEPTANCE_RUN, agentStepPrompt, filesBlock, BUILDER_TESTS, builderFixPrompt, builderPrompt, devPrompt, fastQaPrompt, plannerPrompt, qaDisputePrompt, qaPrompt } from './prompts';
+import { readTestRun, readText, type TestRun } from './testRun';
+import { ACCEPTANCE_RUN, agentStepPrompt, filesBlock, BUILDER_TESTS, builderFixPrompt, builderPrompt, fastQaPrompt, qaDisputePrompt } from './prompts';
 import { requirementClauses } from './requirement';
-import { collectReports, reportPaths } from './reports';
+import { collectReports } from './reports';
 import { readSystem } from './system';
 import { agentTurn, closeSessions, getBus, getConfig, isCancelled, type TurnContext } from './runtime';
 
-export interface GateAnswer { decision: 'approve' | 'revise' | 'retry' | 'replan' | 'abort'; feedback?: string }
+export interface GateAnswer { decision: 'approve' | 'revise' | 'retry' | 'abort'; feedback?: string }
 
 /** What a node decided, for routing: a gate answer, or a reviewer's verdict. */
 type Decision = GateAnswer['decision'] | 'changes' | 'continue';
@@ -40,21 +41,19 @@ export const PipelineState = Annotation.Root({
   warnings: last<string[]>(() => []),
   // Progress
   workspace: last<Workspace | null>(() => null),
-  plan: last<Plan | null>(() => null),
-  /** Input for the next planner or dev turn (approver feedback or a reported spec issue). */
+  /** How to run the Builder's own tests, as it last wrote them. */
+  builderRun: last<TestRun | null>(() => null),
+  /** Input for the Builder's next turn, or for the step a gate sent back (feedback or a reported issue). */
   feedback: last<string | null>(() => null),
   baseline: last<TestBaseline | null>(() => null),
-  moduleIndex: last<number>(() => 0),
   attempt: last<number>(() => 0),
   lastVerify: last<VerifyResult | null>(() => null),
   allModulesDone: last<boolean>(() => false),
   specIssue: last<string | null>(() => null),
   /** The end of Dev's last reply, so QA hears Dev's side when checking a hidden test. */
   lastDevReport: last<string | null>(() => null),
-  /** How many times Dev has disputed QA's tests, per module; past the limit a dispute goes to the Planner. */
-  disputes: last<Record<string, number>>(() => ({})),
-  /** Times the run went back to the Planner because the build could not go on. */
-  replans: last<number>(() => 0),
+  /** How many times QA has checked a hidden test the Builder disputed; past the limit a person decides. */
+  disputes: last<number>(() => 0),
   /** Fast pipeline: how to run QA's hidden acceptance tests. */
   acceptanceRun: last<TestRun | null>(() => null),
   /** Fast pipeline: the Builder says the requirement does not fit the architecture; a person decides. */
@@ -67,7 +66,7 @@ export const PipelineState = Annotation.Root({
   rounds: last<Record<string, number>>(() => ({})),
   /**
    * The agent step a gate sent back with your feedback (in `feedback`). Every role re-run on the
-   * way back to that gate sees the feedback; the Planner or the next gate clears it.
+   * way back to that gate sees the feedback; the next gate clears it.
    */
   revisedTo: last<string | null>(() => null),
   decision: last<Decision | null>(() => null),
@@ -98,15 +97,12 @@ const ctx = (s: S, role: TurnContext['role'], io: TurnContext['io'], key?: strin
 function stepName(step: Step | undefined): string {
   if (!step) { return 'End of run'; }
   switch (step.type) {
-    case 'planner': return 'Planner';
     case 'qa': return 'QA';
     case 'build': return 'Dev';
     case 'gate': return `${step.title} (you)`;
     case 'agent': return step.name;
   }
 }
-
-const PLAN_FILES = ['.devcrew/PRD.md', '.devcrew/plan.json', 'contracts/'];
 
 /** Pause for the approver. Gate nodes re-run from the top on resume, so nothing before this may have side effects. */
 function gate(s: S, gateId: GateId, payload: Record<string, unknown>): GateAnswer {
@@ -117,7 +113,6 @@ function gate(s: S, gateId: GateId, payload: Record<string, unknown>): GateAnswe
 
 // --- Nodes ---
 
-/** The role guide text a built-in step carries in this run, if any. */
 // --- Blind QA: acceptance tests live outside the workspace except while QA writes them or Verify runs them ---
 
 const isBlind = (def: PipelineDef) => def.steps.some(x => x.type === 'qa' && x.blind === true);
@@ -141,10 +136,6 @@ function showAcceptance(s: S): void {
   cpSync(acceptanceStore(s), inWorkspace, { recursive: true });
 }
 
-/** The same command run against acceptance/ instead of tests/; null when the command does not name tests/. */
-const acceptanceCommand = (command: string) => (command.includes('tests/') ? command.replaceAll('tests/', `${ACCEPTANCE}/`) : null);
-
-/** Text files under these paths, to paste into a prompt; none when together they are too big to paste. */
 const MAX_PASTED_CHARS = 80_000;
 function pasteFiles(workspace: string, prefixes: string[]): [string, string][] {
   const files: [string, string][] = [];
@@ -161,202 +152,46 @@ function pastedDiff(ws: Workspace): string | undefined {
   return patch && patch.length <= MAX_PASTED_CHARS ? patch : undefined;
 }
 
-const guideOf = (def: PipelineDef, type: 'planner' | 'qa' | 'build') => {
+/** The role guide text a built-in step carries in this run, if any. */
+const guideOf = (def: PipelineDef, type: 'qa' | 'build') => {
   const step = def.steps.find(x => x.type === type);
   return step && 'guideText' in step ? step.guideText : undefined;
 };
 
-const planner = (def: PipelineDef) => node('planner', async s => {
-  const io = {
-    from: ['You: the task', ...(s.specIssue ? ['Dev: a spec problem'] : s.feedback ? ['You: feedback from a gate'] : [])],
-    reads: [],
-    to: [stepName(def.steps[def.steps.findIndex(x => x.type === 'planner') + 1]), 'then QA and Dev'],
-  };
-  const earlier = reportPaths(def, def.steps.findIndex(x => x.type === 'planner'));
-  const clauses = requirementClauses(s.requirement);
-  await agentTurn(ctx(s, 'planner', { ...io, reads: earlier }), plannerPrompt(s.requirement, s.feedback, earlier, clauses, guideOf(def, 'planner')));
-  // Two chances to fix a malformed or incomplete plan before failing the run
-  for (let fix = 0; ; fix++) {
-    try {
-      return { plan: readPlan(s.workspace!.path, clauses), feedback: null, revisedTo: null, replans: s.plan && !s.revisedTo ? s.replans + 1 : s.replans };
-    } catch (e) {
-      if (fix === 2) { throw e; }
-      await agentTurn({ ...ctx(s, 'planner', { ...io, from: ['System: the plan file was invalid'] }), continues: true }, `Your plan is unusable: ${(e as Error).message}. Fix .devcrew/PRD.md and .devcrew/plan.json.`);
-    }
-  }
-});
-
-const qa = (def: PipelineDef) => node('qa', async s => {
-  closeSessions(s.runId, 'dev');
-  const earlier = reportPaths(def, def.steps.findIndex(x => x.type === 'qa'));
-  const io = { from: ['You: the requirement', 'Planner: spec, contracts and module list'], reads: [...PLAN_FILES, ...earlier], to: ['Dev (build against them)', 'Verify (judge with them)'] };
-  const blind = isBlind(def);
-  const turn = await agentTurn(ctx(s, 'qa', io), qaPrompt(s.plan!, earlier, s.requirement, requirementClauses(s.requirement), guideOf(def, 'qa'), { blind, files: pasteFiles(s.workspace!.path, ['.devcrew/PRD.md', 'contracts/']) }));
-  // QA reports broken tools instead of fixing them; surface each one where a person will see it
-  for (const m of turn.text.matchAll(/^HARNESS_ISSUE:\s*(?!none\b)(.+)$/gim)) {
-    getBus().emit(s.runId, { type: 'log', level: 'warn', message: `QA found a problem outside the tests: ${m[1]}` });
-  }
-  if (countDeclaredTests(s.workspace!.path) === 0) {
-    await agentTurn({ ...ctx(s, 'qa', { ...io, from: ['System: no tests were found'] }), continues: true }, 'No test cases were found under tests/. Write the tests now.');
-  }
-  if (blind) {
-    if (countDeclaredTests(s.workspace!.path, `${ACCEPTANCE}/`) === 0) {
-      await agentTurn({ ...ctx(s, 'qa', { ...io, from: ['System: no acceptance tests were found'] }), continues: true }, `No test cases were found under ${ACCEPTANCE}/. Write the acceptance tests now.`);
-    }
-    hideAcceptance(s);
-  }
-  const baseline = captureBaseline(s.workspace!.path);
-  if (baseline.declared === 0) { throw new Error('QA wrote no tests'); }
-  return { baseline, moduleIndex: 0, attempt: 0, allModulesDone: false, lastVerify: null, disputes: {} };
-});
-
-/** At most this many test disputes per module go to QA; more mean the plan itself is unclear. */
+/** At most this many hidden-test disputes go to QA; more mean a person should look. */
 export const MAX_DISPUTES = 2;
 
 /**
- * At most this many trips back to the Planner from the build. A conflict that survives them is
- * in the requirement or its fixed tests, and only a human can settle it, so the run stops there.
+ * The Builder says a hidden test cannot be passed, or the same one failed twice. QA checks it
+ * against the requirement and fixes it if it is wrong; a conflict in the requirement goes to you.
  */
-export const MAX_REPLANS = 2;
-
-const stuck = node('stuck', async s => {
-  throw new Error(`Stopped after ${s.replans} replans: the requirement or its tests need a human decision. Last problem: ${(s.feedback ?? s.specIssue ?? 'unknown').slice(0, 500)}`);
-});
-
-/**
- * Dev says a test cannot be passed. QA checks it against the requirement and fixes it if it is
- * wrong, so one bad test costs one QA turn instead of a new plan, new tests and every module again.
- */
-const qaDispute = (def: PipelineDef) => node('qa', async s => {
-  const module = s.plan!.modules[s.moduleIndex];
-  const io = { from: ['Dev: a test it says cannot be passed'], reads: [...PLAN_FILES, `tests/${module.id}/`], to: ['Dev (tries again)'] };
-  const blind = isBlind(def);
-  if (blind) { showAcceptance(s); }
-  // In a fast pipeline tests/ belongs to the Builder: QA only answers for its hidden tests
-  const scope = isFast(def) ? { write: [`${ACCEPTANCE}/`], deny: [] } : undefined;
-  const turn = await agentTurn({ ...ctx(s, 'qa', io), scope }, qaDisputePrompt(module, s.specIssue ?? '', s.lastVerify, s.requirement, requirementClauses(s.requirement)));
-  if (blind) { hideAcceptance(s); }
-  const disputes = { ...s.disputes, [module.id]: (s.disputes[module.id] ?? 0) + 1 };
-  const planIssue = turn.text.match(/^PLAN_ISSUE:\s*(.+)$/m)?.[1];
-  if (planIssue) {
-    return { disputes, feedback: `QA and the developer found a problem in the plan for module "${module.id}": ${planIssue}` };
+const qaDispute = node('qa', async s => {
+  const io = { from: ['Builder: a hidden test it says cannot be passed'], reads: [`${ACCEPTANCE}/`], to: ['Builder (tries again)'] };
+  showAcceptance(s);
+  // tests/ belongs to the Builder: QA only answers for its hidden tests
+  const turn = await agentTurn({ ...ctx(s, 'qa', io), scope: { write: [`${ACCEPTANCE}/`], deny: [] } }, qaDisputePrompt(s.specIssue ?? '', s.lastVerify, s.requirement, requirementClauses(s.requirement)));
+  hideAcceptance(s);
+  const disputes = s.disputes + 1;
+  const conflict = turn.text.match(/^REQUIREMENT_ISSUE:\s*(.+)$/m)?.[1];
+  if (conflict) {
+    return { disputes, feedback: `QA and the Builder found a conflict in the requirement: ${conflict}` };
   }
   const answer = turn.text.match(/^QA_ANSWER:\s*(.+)$/m)?.[1] ?? turn.text.trim().split('\n').slice(-3).join(' ');
   // QA may have changed tests: they are the new locked version
   const baseline = captureBaseline(s.workspace!.path);
-  getBus().emit(s.runId, { type: 'log', level: 'info', message: `QA answered a test dispute in ${module.id}: ${answer.slice(0, 300)}` });
+  getBus().emit(s.runId, { type: 'log', level: 'info', message: `QA answered a test dispute: ${answer.slice(0, 300)}` });
   return {
     disputes, baseline, specIssue: null,
-    feedback: `You reported: ${s.specIssue}\nQA checked the tests and answered: ${answer}\nThe tests in tests/ are now final for this module. Make them pass.`,
+    feedback: `You reported: ${s.specIssue}\nQA checked the hidden tests and answered: ${answer}\nThey are now final. Make them pass.`,
   };
-}, s => ({ module: s.plan!.modules[s.moduleIndex].id }));
-
-const dev = (def: PipelineDef) => node('dev', async s => {
-  const module = s.plan!.modules[s.moduleIndex];
-  const earlier = reportPaths(def, def.steps.findIndex(x => x.type === 'build'));
-  const attempt = s.attempt + 1;
-  const io = {
-    from: [
-      'Planner: spec and contracts',
-      `QA: tests for ${module.id}`,
-      ...(attempt > 1 && s.lastVerify ? ['Verify: why the last attempt failed'] : []),
-      ...(s.feedback ? ['Feedback: changes asked by a reviewer or by you'] : []),
-    ],
-    reads: ['.devcrew/PRD.md', 'contracts/', `tests/${module.id}/`, ...earlier],
-    to: ['Verify'],
-  };
-  // One developer session across modules: it already knows the PRD and contracts, and starts fresh once it grows past the limit
-  const turn = await agentTurn(ctx(s, 'dev', io), devPrompt(s.plan!, module, attempt, s.lastVerify, s.feedback, earlier, s.requirement, requirementClauses(s.requirement), guideOf(def, 'build'), {
-    blind: isBlind(def),
-    // First attempt only: on a retry the session already holds them, or a fresh one reads what it needs
-    files: attempt === 1 ? pasteFiles(s.workspace!.path, ['.devcrew/PRD.md', 'contracts/', `tests/${module.id}/`]) : [],
-  }));
-  const issue = turn.text.match(/^SPEC_ISSUE:\s*(.+)$/m)?.[1] ?? null;
-  return {
-    attempt,
-    feedback: issue ? `The developer reported a spec issue in module "${module.id}": ${issue}` : null,
-    specIssue: issue,
-    lastDevReport: turn.text.trim().slice(-1500),
-  };
-}, s => ({ module: s.plan!.modules[s.moduleIndex].id, attempt: s.attempt + 1 }));
-
-const verifyNode = (def: PipelineDef) => node('verify', async s => {
-  const plan = s.plan!;
-  const ws = s.workspace!.path;
-  const module = plan.modules[s.moduleIndex];
-  const isLast = s.moduleIndex === plan.modules.length - 1;
-  const moduleTests = countDeclaredTests(ws, `tests/${module.id}/`);
-
-  // A module is judged by its own tests; the last one by the whole suite instead, which includes
-  // them (running both ran every test of that module twice, on HW-01 two flashes of the board)
-  const runs: VerifyResult[] = [];
-  const commands: string[] = [];
-  if (plan.moduleTestCommand && moduleTests > 0 && !isLast) {
-    commands.push(plan.moduleTestCommand.replaceAll('{module}', module.id));
-    runs.push(await verify({ workspace: ws, testCommand: commands[0], baseline: s.baseline!, expectedTests: moduleTests, testFormats: plan.testFormats }));
-  }
-  // Blind QA: the hidden acceptance tests judge the module too, and only exist in the workspace meanwhile
-  let acceptanceModuleRun = false;
-  if (isBlind(def)) {
-    showAcceptance(s);
-    try {
-      const moduleCommand = plan.moduleTestCommand && acceptanceCommand(plan.moduleTestCommand.replaceAll('{module}', module.id));
-      const moduleAcceptance = countDeclaredTests(ws, `${ACCEPTANCE}/${module.id}/`);
-      const allCommand = acceptanceCommand(plan.testCommand);
-      if (moduleCommand && moduleAcceptance > 0 && !(isLast && allCommand)) {
-        commands.push(moduleCommand);
-        runs.push(await verify({ workspace: ws, testCommand: moduleCommand, baseline: s.baseline!, expectedTests: moduleAcceptance, testFormats: plan.testFormats }));
-        acceptanceModuleRun = true;
-      }
-      // The last module is also judged by every module's acceptance tests (regressions)
-      if (isLast && allCommand) {
-        commands.push(allCommand);
-        runs.push(await verify({ workspace: ws, testCommand: allCommand, baseline: s.baseline!, expectedTests: countDeclaredTests(ws, `${ACCEPTANCE}/`), testFormats: plan.testFormats }));
-      } else if (isLast && plan.moduleTestCommand) {
-        for (const other of plan.modules.filter(m => m.id !== module.id)) {
-          const command = acceptanceCommand(plan.moduleTestCommand.replaceAll('{module}', other.id));
-          const expected = countDeclaredTests(ws, `${ACCEPTANCE}/${other.id}/`);
-          if (!command || expected === 0) { continue; }
-          commands.push(command);
-          runs.push(await verify({ workspace: ws, testCommand: command, baseline: s.baseline!, expectedTests: expected, testFormats: plan.testFormats }));
-        }
-      } else if (!allCommand && !plan.moduleTestCommand) {
-        getBus().emit(s.runId, { type: 'log', level: 'warn', message: `Neither test command names tests/, so the acceptance tests cannot be run: ${plan.testCommand}` });
-      }
-    } finally {
-      hideAcceptance(s);
-    }
-  }
-  if (isLast || runs.length === 0) {
-    commands.push(plan.testCommand, ...(isLast ? plan.checks ?? [] : []).map(c => c.command));
-    runs.push(await verify({ workspace: ws, testCommand: plan.testCommand, baseline: s.baseline!, checks: isLast ? plan.checks : [], testFormats: plan.testFormats }));
-  }
-  // Without per-module tests, earlier modules cannot pass alone: only judge at the end
-  const deferred = runs.length === 1 && !isLast && !(plan.moduleTestCommand && moduleTests > 0) && !acceptanceModuleRun;
-  // A project with an architecture file is held to it once all of its modules exist
-  const architecture = isLast ? architectureReasons(ws) : [];
-  const result: VerifyResult = {
-    passed: (deferred || runs.every(r => r.passed)) && !architecture.length,
-    tests: runs[runs.length - 1].tests,
-    reasons: [...(deferred ? [] : runs.flatMap(r => r.reasons)), ...architecture],
-    output: runs.map(r => r.output).join('\n\n'),
-  };
-  getBus().emit(s.runId, { type: 'verify_result', module: module.id, attempt: s.attempt, passed: result.passed, tests: result.tests, reasons: result.reasons, output: result.output.slice(-6000), commands });
-  if (result.passed && !isLast) {
-    return { lastVerify: result, moduleIndex: s.moduleIndex + 1, attempt: 0, feedback: null };
-  }
-  const specIssue = isBlind(def) ? repeatedHiddenFailure(s, result) : null;
-  if (specIssue) { return { lastVerify: result, allModulesDone: false, feedback: null, specIssue }; }
-  return { lastVerify: result, allModulesDone: result.passed && isLast, feedback: null };
-}, s => ({ module: s.plan!.modules[s.moduleIndex].id, attempt: s.attempt }));
+}, () => ({ module: MAIN.id }));
 
 /**
  * Blind QA: Dev cannot see a hidden test to argue with it. When the same tests fail twice in a
  * row, QA checks them against the requirement before Dev tries again.
  */
 function repeatedHiddenFailure(s: S, result: VerifyResult): string | null {
-  const module = s.plan!.modules[s.moduleIndex];
-  if (result.passed || !s.lastVerify || s.lastVerify.passed || (s.disputes[module.id] ?? 0) >= MAX_DISPUTES) { return null; }
+  if (result.passed || !s.lastVerify || s.lastVerify.passed || s.disputes >= MAX_DISPUTES) { return null; }
   const now = failingTests(result.output);
   const before = failingTests(s.lastVerify.output);
   if (!now.length || now.length !== before.length || !now.every(t => before.includes(t))) { return null; }
@@ -387,7 +222,7 @@ export function failingTests(output: string): string[] {
   return [...names];
 }
 
-// --- Fast pipeline: the Builder and a blind QA start together; Verify judges with both test sets ---
+// --- The build: the Builder and a blind QA start together; Verify judges with both test sets ---
 
 const isFast = (def: PipelineDef) => def.kind === 'fast';
 
@@ -411,11 +246,14 @@ function architectureReasons(ws: string): string[] {
 /** The architecture files, pasted for the Builder; none when the project has no architecture. */
 const architectureFiles = (ws: string) => (existsSync(join(ws, ARCHITECTURE_FILE)) ? pasteFiles(ws, [ARCHITECTURE_FILE, ARCHITECTURE_DOC, 'contracts/']) : []);
 
-/** The Builder writes everything except QA's hidden tests and, once there is one, the architecture it builds in. */
-const builderScope = (ws: string) => ({
-  write: ['*'],
+/**
+ * The Builder writes everything except QA's hidden tests, what the research roles left (a test rig
+ * it could otherwise bend to pass) and, once there is one, the architecture it builds in.
+ */
+export const builderScope = (def: PipelineDef, ws: string) => ({
+  write: ROLE_SCOPES.dev.write,
   // contracts/ stays the Builder's to extend: frozen, it fell behind the code in every later change (roadmap-self)
-  deny: [`${ACCEPTANCE}/`, ACCEPTANCE_RUN, ...(existsSync(join(ws, ARCHITECTURE_FILE)) ? [ARCHITECTURE_FILE, ARCHITECTURE_DOC] : [])],
+  deny: [...ROLE_SCOPES.dev.deny, ...researchPaths(def), ...(existsSync(join(ws, ARCHITECTURE_FILE)) ? [ARCHITECTURE_FILE, ARCHITECTURE_DOC] : [])],
 });
 
 /** A Builder's answer that says the requirement needs another architecture. */
@@ -434,9 +272,11 @@ const buildEntry = (def: PipelineDef) => {
     targets: architect ? [architect, 'qa'] : ['qa'],
   };
 };
-/** Reports of the research roles before QA (add-ons such as the codebase analyst), for the Builder and QA. */
-const researchReports = (def: PipelineDef, ws: string) =>
-  pasteFiles(ws, def.steps.slice(0, def.steps.findIndex(x => x.type === 'qa')).flatMap(x => (x.type === 'agent' && x.instructions !== 'builtin:architect' ? x.mayWrite : [])));
+/** What the research roles before QA write (add-ons such as the codebase analyst or the HIL rig). */
+const researchPaths = (def: PipelineDef) =>
+  def.steps.slice(0, def.steps.findIndex(x => x.type === 'qa')).flatMap(x => (x.type === 'agent' && x.instructions !== 'builtin:architect' ? x.mayWrite : []));
+/** Their reports, for the Builder and QA. */
+const researchReports = (def: PipelineDef, ws: string) => pasteFiles(ws, researchPaths(def));
 
 /** What a Builder's answer hands on: an architecture change goes to the Architect as its feedback. */
 const builderAsks = (def: PipelineDef, s: S, text: string) => {
@@ -445,11 +285,8 @@ const builderAsks = (def: PipelineDef, s: S, text: string) => {
     ? { archChange, feedback: `The Builder needs this change to the architecture to build the requirement: ${archChange}`, revisedTo: architectOf(def) }
     : { archChange, revisedTo: null };
 };
-const FAST_QA_SCOPE = { write: [`${ACCEPTANCE}/`, ACCEPTANCE_RUN], deny: [] };
-const MAIN: Plan['modules'][number] = { id: 'main', title: 'Build', description: 'Everything the requirement asks for.' };
-
-/** The plan a fast run judges with: one module, and the Builder's own test command. */
-const fastPlan = (run: TestRun): Plan => ({ modules: [MAIN], architecture: [], ...run });
+/** The one unit of work a build is judged as, in events and in QA's dispute prompt. */
+const MAIN = { id: 'main', title: 'Build', description: 'Everything the requirement asks for.' };
 
 /** Reads a test run file, giving the agent one follow-up turn to fix it. */
 async function testRunOf(turn: TurnContext, rel: string): Promise<TestRun> {
@@ -474,8 +311,8 @@ const fastWork = (def: PipelineDef) => node('qa', async s => {
 
   const architecture = architectureFiles(ws);
   const reports = researchReports(def, ws);
-  const builder: TurnContext = { ...ctx(s, 'dev', { from: ['You: the requirement', ...(architecture.length ? ['Architect: the architecture'] : [])], reads: [], to: ['Verify'] }), scope: builderScope(ws) };
-  const qa: TurnContext = { ...ctx(s, 'qa', { from: ['You: the requirement'], reads: [], to: ['Verify (judge with them)'] }), workspace: copy, scope: FAST_QA_SCOPE };
+  const builder: TurnContext = { ...ctx(s, 'dev', { from: ['You: the requirement', ...(architecture.length ? ['Architect: the architecture'] : [])], reads: [], to: ['Verify'] }), scope: builderScope(def, ws) };
+  const qa: TurnContext = { ...ctx(s, 'qa', { from: ['You: the requirement'], reads: [], to: ['Verify (judge with them)'] }), workspace: copy, scope: ROLE_SCOPES.qa };
   getBus().emit(s.runId, { type: 'node_started', node: 'dev', module: MAIN.id, attempt: 1 });
   const [built] = await Promise.all([
     agentTurn(builder, builderPrompt(s.requirement, clauses, guideOf(def, 'build'), architecture, reports)).then(async turn => ({ turn, run: await testRunOf(builder, BUILDER_TESTS) })),
@@ -494,8 +331,8 @@ const fastWork = (def: PipelineDef) => node('qa', async s => {
   closeSessions(s.runId, 'qa');
   if (countDeclaredTests(acceptanceStore(s), '') === 0) { throw new Error('QA wrote no acceptance tests'); }
   return {
-    plan: fastPlan(built.run), acceptanceRun, baseline: captureBaseline(ws),
-    moduleIndex: 0, attempt: 1, allModulesDone: false, lastVerify: null, disputes: {},
+    builderRun: built.run, acceptanceRun, baseline: captureBaseline(ws),
+    attempt: 1, allModulesDone: false, lastVerify: null, disputes: 0,
     lastDevReport: built.turn.text.trim().slice(-1500), ...builderAsks(def, s, built.turn.text),
   };
 });
@@ -505,7 +342,7 @@ const fastDev = (def: PipelineDef) => node('dev', async s => {
   const attempt = s.attempt + 1;
   const turn: TurnContext = {
     ...ctx(s, 'dev', { from: [...(s.lastVerify && !s.lastVerify.passed ? ['Verify: what failed'] : []), ...(s.feedback ? ['Feedback'] : [])], reads: [], to: ['Verify'] }),
-    scope: builderScope(s.workspace!.path),
+    scope: builderScope(def, s.workspace!.path),
   };
   // Back from the Architect: the design changed as asked, and the Builder carries on inside it
   const changed = s.archChange
@@ -514,7 +351,7 @@ const fastDev = (def: PipelineDef) => node('dev', async s => {
   const result = await agentTurn(turn, builderFixPrompt(attempt, s.lastVerify, [changed, s.feedback].filter(Boolean).join('\n\n') || null));
   const issue = result.text.match(/^SPEC_ISSUE:\s*(.+)$/m)?.[1] ?? null;
   return {
-    attempt, plan: fastPlan(await testRunOf(turn, BUILDER_TESTS)), specIssue: issue, archChanges: s.archChanges + (changed ? 1 : 0),
+    attempt, builderRun: await testRunOf(turn, BUILDER_TESTS), specIssue: issue, archChanges: s.archChanges + (changed ? 1 : 0),
     ...builderAsks(def, { ...s, archChanges: s.archChanges + (changed ? 1 : 0) }, result.text),
     feedback: issue ? `The Builder reported a problem with a hidden test: ${issue}` : null,
     lastDevReport: result.text.trim().slice(-1500),
@@ -525,8 +362,8 @@ const fastDev = (def: PipelineDef) => node('dev', async s => {
 const fastVerify = node('verify', async s => {
   const ws = s.workspace!.path;
   const baseline = captureBaseline(ws);
-  const commands = [s.plan!.testCommand, s.acceptanceRun!.testCommand];
-  const own = await verify({ workspace: ws, testCommand: commands[0], baseline, expectedTests: countDeclaredTests(ws, 'tests/'), testFormats: s.plan!.testFormats });
+  const commands = [s.builderRun!.testCommand, s.acceptanceRun!.testCommand];
+  const own = await verify({ workspace: ws, testCommand: commands[0], baseline, expectedTests: countDeclaredTests(ws, 'tests/'), testFormats: s.builderRun!.testFormats });
   showAcceptance(s);
   let hidden: VerifyResult;
   try {
@@ -546,24 +383,22 @@ const fastVerify = node('verify', async s => {
 }, s => ({ module: MAIN.id, attempt: s.attempt }));
 
 const escalate = async (s: S): Promise<U> => {
-  const module = s.plan!.modules[s.moduleIndex];
   // Unattended (benchmark) runs have nobody to escalate to: out of attempts means failed
   const archChange = s.archChange ? `The Builder says the requirement does not fit the architecture: ${s.archChange}` : null;
   if (s.autoApprove) {
     getBus().emit(s.runId, { type: 'gate_resolved', gate: 'escalation', decision: 'abort', feedback: 'Out of fix attempts (unattended run)' });
     const why = s.lastVerify?.reasons.join('; ') || 'tests still failing';
-    return { decision: 'abort', status: 'failed', error: archChange ?? `Module "${module.id}" still failing after ${s.attempt} attempts: ${why}` };
+    return { decision: 'abort', status: 'failed', error: archChange ?? `Still failing after ${s.attempt} attempts: ${why}` };
   }
   const answer = gate(s, 'escalation', {
     kind: 'escalation',
-    title: archChange ? 'The Builder asks for an architecture change' : `Module "${module.id}" still failing after ${s.attempt} attempts`,
-    module: module.id,
+    title: archChange ? 'The Builder asks for an architecture change' : `Still failing after ${s.attempt} attempts`,
+    module: MAIN.id,
     attempts: s.attempt,
     reasons: archChange ? [archChange] : s.lastVerify?.reasons ?? [],
     output: s.lastVerify?.output.slice(-4000) ?? '',
   });
   if (answer.decision === 'retry') { return { decision: 'retry', attempt: 0, feedback: answer.feedback ?? null, archChange: null }; }
-  if (answer.decision === 'replan') { return { decision: 'replan', feedback: answer.feedback ?? `Module "${module.id}" could not be made to pass: ${s.lastVerify?.reasons.join('; ')}` }; }
   return { decision: 'abort', status: 'aborted' };
 };
 
@@ -584,9 +419,9 @@ async function agentStep(step: AgentStep, nextStep: Step | undefined, s: S, sees
   const sentBack = s.rounds[step.id] ?? 0;
   const sendsBack = step.verdict?.onChanges === 'dev';
   const io = {
-    from: step.reads.map(r => (r === 'git diff' ? 'Dev: all code changes' : PLAN_FILES.includes(r) ? `Planner: ${r}` : r)),
+    from: step.reads.map(r => (r === 'git diff' ? 'Builder: all code changes' : r)),
     reads: step.reads.filter(r => r !== 'git diff'),
-    to: [...(sendsBack ? ['Dev, if something must be fixed'] : []), stepName(nextStep)],
+    to: [...(sendsBack ? ['Builder, if something must be fixed'] : []), stepName(nextStep)],
   };
   const gateFeedback = s.revisedTo ? s.feedback : null;
   if (gateFeedback) { io.from.unshift('You: feedback from a gate'); }
@@ -655,16 +490,7 @@ async function gateStep(def: PipelineDef, step: GateStep, s: S): Promise<U> {
   // Every report written by the agent steps before this gate
   const reports = collectReports(s.workspace!.path, def, def.steps.findIndex(x => x.id === step.id));
   let payload: Record<string, unknown>;
-  if (step.review === 'plan') {
-    payload = {
-      prd: readText(s.workspace!.path, '.devcrew/PRD.md'),
-      plan: s.plan,
-      clauses: requirementClauses(s.requirement),
-      contracts: diffSince(s.workspace!).files.filter(f => f.path.startsWith('contracts/')).map(f => f.path),
-      specIssue: s.specIssue,
-      reports,
-    };
-  } else if (step.review === 'architecture') {
+  if (step.review === 'architecture') {
     payload = {
       architecture: (() => { try { return readArchitecture(s.workspace!.path); } catch { return null; } })(),
       architectureError: architectureProblem(s.workspace!.path),
@@ -710,7 +536,7 @@ async function gateStep(def: PipelineDef, step: GateStep, s: S): Promise<U> {
   if (answer.decision === 'revise') {
     const target = def.steps.find(x => x.id === step.reviseTo)!;
     if (target.type === 'build') {
-      // Back to the last module's developer with your notes
+      // Back to the Builder with your notes
       return { decision: 'revise', feedback: answer.feedback ?? 'Address the review findings.', attempt: 0, allModulesDone: false, specIssue: null };
     }
     return { decision: 'revise', feedback: answer.feedback ?? null, specIssue: null, revisedTo: target.type === 'agent' ? target.id : null };
@@ -767,47 +593,17 @@ export function buildGraph(def: PipelineDef = loadPipeline('fast')) {
     (first ? g.addEdge('setup', first) : g.addConditionalEdges('setup', entry.to, entry.targets))
       // A Builder that needs another architecture goes to the Architect (and your approval), or to you
       .addNode('qa', fastWork(def)).addConditionalEdges('qa', (s: S) => (s.archChange ? (s.revisedTo ?? 'escalate') : 'verify'), ['verify', 'escalate', ...(architect ? [architect] : [])])
-      .addNode('dev', fastDev(def)).addNode('verify', fastVerify).addNode('dispute', qaDispute(def)).addNode('escalate', escalate)
-      .addConditionalEdges('dev', (s: S) => (s.archChange ? (s.revisedTo ?? 'escalate') : !s.specIssue ? 'verify' : (s.disputes[MAIN.id] ?? 0) < MAX_DISPUTES ? 'dispute' : 'escalate'), ['verify', 'dispute', 'escalate', ...(architect ? [architect] : [])])
+      .addNode('dev', fastDev(def)).addNode('verify', fastVerify).addNode('dispute', qaDispute).addNode('escalate', escalate)
+      .addConditionalEdges('dev', (s: S) => (s.archChange ? (s.revisedTo ?? 'escalate') : !s.specIssue ? 'verify' : s.disputes < MAX_DISPUTES ? 'dispute' : 'escalate'), ['verify', 'dispute', 'escalate', ...(architect ? [architect] : [])])
       .addConditionalEdges('verify', (s: S) => (s.allModulesDone ? after : s.specIssue ? 'dispute' : s.attempt >= maxAttempts ? 'escalate' : 'dev'), [...new Set([after, 'dev', 'dispute', 'escalate'])])
-      // No Planner to send a plan problem to: a person decides
+      // QA found a conflict in the requirement itself: a person decides
       .addConditionalEdges('dispute', (s: S) => (s.specIssue ? 'escalate' : 'dev'), ['dev', 'escalate'])
-      .addConditionalEdges('escalate', (s: S) => (s.decision === 'retry' || s.decision === 'replan' ? 'dev' : 'finish'), ['dev', 'finish']);
+      .addConditionalEdges('escalate', (s: S) => (s.decision === 'retry' ? 'dev' : 'finish'), ['dev', 'finish']);
   }
 
   for (const step of steps) {
     if (isFast(def) && (step.type === 'qa' || step.type === 'build')) { continue; }
     switch (step.type) {
-      case 'planner':
-        g.addNode('planner', planner(def)).addEdge('planner', nextNode('planner'));
-        break;
-      case 'qa':
-        g.addNode('qa', qa(def)).addEdge('qa', nextNode('qa'));
-        break;
-      case 'build': {
-        const after = nextNode('build');
-        const hasQa = steps.some(x => x.type === 'qa');
-        const replan = (s: S) => (s.replans >= MAX_REPLANS ? 'stuck' : 'planner');
-        g.addNode('dev', dev(def)).addNode('stuck', stuck).addNode('verify', verifyNode(def)).addNode('escalate', escalate)
-          .addConditionalEdges('dev', (s: S) => {
-            if (!s.specIssue) { return 'verify'; }
-            const module = s.plan!.modules[s.moduleIndex].id;
-            return hasQa && (s.disputes[module] ?? 0) < MAX_DISPUTES ? 'dispute' : replan(s);
-          }, ['verify', 'planner', 'stuck', ...(hasQa ? ['dispute'] : [])]);
-        if (hasQa) {
-          g.addNode('dispute', qaDispute(def))
-            .addConditionalEdges('dispute', (s: S) => (s.specIssue ? replan(s) : 'dev'), ['dev', 'planner', 'stuck']);
-        }
-        g
-          .addConditionalEdges('verify', (s: S) => {
-            if (s.allModulesDone) { return after; }
-            if (s.lastVerify?.passed) { return 'dev'; }
-            if (hasQa && s.specIssue) { return 'dispute'; }
-            return s.attempt >= maxAttempts ? 'escalate' : 'dev';
-          }, [...new Set([after, 'dev', 'escalate', ...(hasQa ? ['dispute'] : [])])])
-          .addConditionalEdges('escalate', (s: S) => (s.decision === 'retry' ? 'dev' : s.decision === 'replan' ? replan(s) : 'finish'), ['dev', 'planner', 'stuck', 'finish']);
-        break;
-      }
       case 'gate': {
         // An architecture approved mid-build (the Builder asked for it) goes back to the Builder, not to a fresh start
         const midBuild = isFast(def) && step.review === 'architecture';

@@ -25,32 +25,32 @@ test('parses node:test counts from spec output, with or without colors', () => {
   assert.deepEqual(parseTestCounts('# tests 2\n# pass 2\n# fail 0\n# skipped 1\n'), { total: 2, pass: 2, fail: 0, skipped: 1 });
 });
 
-test('role scopes: dev cannot touch tests, contracts or .devcrew; qa only tests', () => {
+test('role scopes: the Builder cannot touch the hidden tests; QA only writes them', () => {
   const ws = '/w';
   assert.equal(isAllowed(ROLE_SCOPES.dev, ws, '/w/src/a.ts'), true);
-  assert.equal(isAllowed(ROLE_SCOPES.dev, ws, '/w/tests/a.test.ts'), false);
-  assert.equal(isAllowed(ROLE_SCOPES.dev, ws, 'contracts/api.yaml'), false);
-  assert.equal(isAllowed(ROLE_SCOPES.dev, ws, '/w/.devcrew/plan.json'), false);
+  assert.equal(isAllowed(ROLE_SCOPES.dev, ws, '/w/tests/a.test.ts'), true);
+  assert.equal(isAllowed(ROLE_SCOPES.dev, ws, '/w/acceptance/a.test.ts'), false);
+  assert.equal(isAllowed(ROLE_SCOPES.dev, ws, '.devcrew/acceptance.json'), false);
   assert.equal(isAllowed(ROLE_SCOPES.dev, ws, '/elsewhere/x.ts'), false);
-  assert.equal(isAllowed(ROLE_SCOPES.qa, ws, '/w/tests/x/a.test.ts'), true);
+  assert.equal(isAllowed(ROLE_SCOPES.qa, ws, '/w/acceptance/x/a.test.ts'), true);
   assert.equal(isAllowed(ROLE_SCOPES.qa, ws, '/w/src/a.ts'), false);
   assert.equal(isAllowed(ROLE_SCOPES.reviewer, ws, '/w/.devcrew/review.md'), true);
-  assert.equal(isAllowed(ROLE_SCOPES.reviewer, ws, '/w/.devcrew/PRD.md'), false);
+  assert.equal(isAllowed(ROLE_SCOPES.reviewer, ws, '/w/src/a.ts'), false);
 });
 
 test('reverts out-of-scope edits, creations and deletions, keeps the rest', () => {
-  const ws = workspace({ 'tests/a.test.ts': 'original', 'tests/b.test.ts': 'keep me', 'src/x.ts': 'old' });
+  const ws = workspace({ 'acceptance/a.test.ts': 'original', 'acceptance/b.test.ts': 'keep me', 'src/x.ts': 'old' });
   const before = takeSnapshot(ws);
-  writeFileSync(join(ws, 'tests/a.test.ts'), 'weakened');
-  writeFileSync(join(ws, 'tests/new.test.ts'), 'sneaky');
-  writeFileSync(join(ws, 'tests/b.test.ts'), '');
+  writeFileSync(join(ws, 'acceptance/a.test.ts'), 'weakened');
+  writeFileSync(join(ws, 'acceptance/new.test.ts'), 'sneaky');
+  writeFileSync(join(ws, 'acceptance/b.test.ts'), '');
   writeFileSync(join(ws, 'src/x.ts'), 'new');
 
   const reverted = revertOutOfScope(ws, before, ROLE_SCOPES.dev);
-  assert.deepEqual(reverted, ['tests/a.test.ts', 'tests/b.test.ts', 'tests/new.test.ts']);
-  assert.equal(readFileSync(join(ws, 'tests/a.test.ts'), 'utf8'), 'original');
-  assert.equal(readFileSync(join(ws, 'tests/b.test.ts'), 'utf8'), 'keep me');
-  assert.equal(existsSync(join(ws, 'tests/new.test.ts')), false);
+  assert.deepEqual(reverted, ['acceptance/a.test.ts', 'acceptance/b.test.ts', 'acceptance/new.test.ts']);
+  assert.equal(readFileSync(join(ws, 'acceptance/a.test.ts'), 'utf8'), 'original');
+  assert.equal(readFileSync(join(ws, 'acceptance/b.test.ts'), 'utf8'), 'keep me');
+  assert.equal(existsSync(join(ws, 'acceptance/new.test.ts')), false);
   assert.equal(readFileSync(join(ws, 'src/x.ts'), 'utf8'), 'new');
 });
 
@@ -168,4 +168,16 @@ test('PlatformIO build output is neither guarded, copied nor committed', async (
   assert.deepEqual(diffSince(ws).files.map(f => f.path), ['src/relay.cpp']);
   commitAll(ws, 'build');
   assert.deepEqual(tracked(), ['src/main.cpp', 'src/relay.cpp']);
+});
+
+test('the Builder cannot change what research roles left, such as a HIL rig it could bend to pass', async () => {
+  const { builderScope } = await import('../src/orchestrator/graph');
+  const { composePipeline, loadPipeline } = await import('../src/pipeline/schema');
+  const ws = workspace({ 'src/x.ts': '' });
+  const scope = builderScope(composePipeline(loadPipeline('fast'), ['hardware']), ws);
+  assert.equal(isAllowed(scope, ws, join(ws, '.devcrew/hil/run.sh')), false);
+  assert.equal(isAllowed(scope, ws, join(ws, '.devcrew/hardware/board.md')), false);
+  assert.equal(isAllowed(scope, ws, join(ws, 'acceptance/a.test.ts')), false);
+  assert.equal(isAllowed(scope, ws, join(ws, 'src/main.c')), true);
+  assert.equal(isAllowed(builderScope(loadPipeline('fast'), ws), ws, join(ws, '.devcrew/hil/run.sh')), true, 'without research roles .devcrew/ is the Builder\'s');
 });

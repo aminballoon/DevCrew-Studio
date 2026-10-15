@@ -4,33 +4,31 @@ import { join } from 'node:path';
 import { STUDIO_ROOT } from '../core/config';
 
 /**
- * A pipeline is an ordered list of steps. A "build" pipeline (the default) produces code:
- * the built-in steps (planner, qa, build) carry the guardrails and must appear exactly once,
- * with gates and agent steps around them. A "design" pipeline produces documents and a system
- * diagram only: agent steps and design gates, no code. A "fast" pipeline has no Planner: one
- * Builder writes the code while a blind QA writes hidden tests from the requirement in parallel.
+ * A pipeline is an ordered list of steps. A "fast" pipeline produces code: one Builder writes it
+ * while a blind QA writes hidden tests from the requirement at the same time (the qa and build
+ * steps, once each), with research roles, an optional Architect, reviewers and gates around them.
+ * A "design" pipeline produces documents and a system diagram only: agent steps and design gates.
  * See pipelines/SCHEMA.md.
  */
-export type Step = PlannerStep | QaStep | BuildStep | GateStep | AgentStep;
+export type Step = QaStep | BuildStep | GateStep | AgentStep;
 
 /**
  * Built-in roles keep DevCrew's own instructions; `guide` ("guide:<name>") adds a role guide on top,
  * such as the techniques and tools a specialist uses. A run carries its text in `guideText`.
  */
 interface WithGuide { guide?: string; guideText?: string }
-export interface PlannerStep extends WithGuide { type: 'planner'; id: 'planner' }
 export interface QaStep extends WithGuide {
   type: 'qa'; id: 'qa';
   /**
-   * Blind QA: most tests (acceptance/) are kept away from Dev and only run when Verify judges the
-   * work, so Dev builds from the requirement, not from the tests. Dev sees which behaviours fail.
+   * Blind QA: its tests (acceptance/) are kept away from the Builder and only run when Verify
+   * judges the work, so the Builder works from the requirement and sees only which tests fail.
    */
   blind?: boolean;
 }
 export interface BuildStep extends WithGuide {
   type: 'build';
   id: 'build';
-  /** Dev attempts per module before asking a human (defaults to the config value). */
+  /** Builder attempts before asking a human (defaults to the config value). */
   maxAttempts?: number;
 }
 
@@ -39,11 +37,11 @@ export interface GateStep {
   id: string;
   title: string;
   /**
-   * What you are shown: the plan (spec, architecture and earlier reports), the code (diff,
-   * tests, reviews) or, in a design pipeline, the design (system diagram and reports).
+   * What you are shown: the Architect's design, the code (diff, tests, reviews) or, in a design
+   * pipeline, the design (system diagram and reports).
    */
-  review: 'plan' | 'code' | 'design' | 'architecture';
-  /** Step that gets your feedback when you ask for changes ("build" means Dev). */
+  review: 'code' | 'design' | 'architecture';
+  /** Step that gets your feedback when you ask for changes ("build" means the Builder). */
   reviseTo: string;
 }
 
@@ -73,7 +71,7 @@ export interface AgentStep {
   /** Optional verdict: the first line of `file` is "VERDICT: approve" or "VERDICT: changes". */
   verdict?: {
     file: string;
-    /** "dev": changes send the work back to Dev (after build only). "continue": just report. */
+    /** "dev": changes send the work back to the Builder (after build only). "continue": just report. */
     onChanges: 'dev' | 'continue';
     /** How many times it may send work back. */
     maxRounds?: number;
@@ -91,11 +89,8 @@ export interface PipelineDef {
   id: string;
   name: string;
   description: string;
-  /**
-   * "build" (default) ends in committed code; "design" ends in approved documents and a diagram;
-   * "fast" ends in committed code built by one Builder, judged by tests it never sees.
-   */
-  kind?: 'build' | 'design' | 'fast';
+  /** "fast" ends in committed code built by one Builder, judged by tests it never sees; "design" ends in approved documents and a diagram. */
+  kind: 'fast' | 'design';
   steps: Step[];
   /** Written on approval: the version of each role guide you approved, by name. */
   guideHashes?: Record<string, string>;
@@ -161,7 +156,7 @@ export function validatePipeline(raw: unknown): string[] {
   steps.forEach((s, i) => {
     const where = `Step ${i + 1}${s && typeof s.id === 'string' ? ` ("${s.id}")` : ''}`;
     if (!s || typeof s !== 'object') { errors.push(`${where} is not an object.`); return; }
-    if (!['planner', 'qa', 'build', 'gate', 'agent'].includes(s.type)) { errors.push(`${where}: "type" must be planner, qa, build, gate or agent.`); return; }
+    if (!['qa', 'build', 'gate', 'agent'].includes(s.type)) { errors.push(`${where}: "type" must be qa, build, gate or agent.`); return; }
     if (typeof s.id !== 'string' || !ID.test(s.id)) { errors.push(`${where}: "id" must be lowercase letters, digits, - or _.`); return; }
     if (RESERVED_IDS.includes(s.id)) { errors.push(`${where}: "${s.id}" is reserved, pick another id.`); }
     if (ids.has(s.id)) { errors.push(`${where}: id "${s.id}" is used twice.`); }
@@ -171,14 +166,14 @@ export function validatePipeline(raw: unknown): string[] {
 
   const index = (id: string) => steps.findIndex(s => s.id === id);
   const count = (type: Step['type']) => steps.filter(s => s?.type === type).length;
-  if (def.kind !== undefined && def.kind !== 'build' && def.kind !== 'design' && def.kind !== 'fast') { errors.push('"kind" must be "build", "design" or "fast".'); }
+  if (def.kind !== 'design' && def.kind !== 'fast') { errors.push('"kind" must be "fast" (code) or "design" (documents and a diagram).'); return errors; }
   const design = def.kind === 'design';
   const lastStep = steps[steps.length - 1];
   // Without a build step, "after build" means never
   let iBuild = Infinity;
 
   if (design) {
-    for (const type of ['planner', 'qa', 'build'] as const) {
+    for (const type of ['qa', 'build'] as const) {
       if (count(type)) { errors.push(`A design pipeline has no "${type}" step: it produces documents and a diagram, not code.`); }
     }
     if (!count('agent')) { errors.push('A design pipeline needs at least one agent step to do the work.'); }
@@ -186,9 +181,7 @@ export function validatePipeline(raw: unknown): string[] {
       errors.push('The last step must be a gate with "review": "design", so you approve the design before it is committed.');
     }
     if (errors.length) { return errors; }
-  } else if (def.kind === 'fast') {
-    // The blind QA and the Builder start together, so they open the pipeline, in that order
-    if (count('planner')) { errors.push('A fast pipeline has no "planner" step: the Builder plans its own work.'); }
+  } else {
     // First any research roles (reports under .devcrew/), then optionally the Architect and the gate
     // where you approve its design; the Architect runs only when the project has none yet
     const iQaFast = index('qa');
@@ -213,28 +206,6 @@ export function validatePipeline(raw: unknown): string[] {
     }
     if (errors.length) { return errors; }
     iBuild = index('build');
-  } else {
-    for (const type of ['planner', 'qa', 'build'] as const) {
-      if (count(type) !== 1) { errors.push(`There must be exactly one "${type}" step (found ${count(type)}).`); }
-    }
-    if (errors.length) { return errors; }
-    const iPlanner = index('planner'), iQa = index('qa');
-    iBuild = index('build');
-    // Research roles may run before the Planner, so the plan is written with their findings
-    steps.slice(0, iPlanner).forEach(s => {
-      if (s.type !== 'agent') { errors.push(`Step "${s.id}": only agent steps may come before the planner (found a ${s.type}).`); }
-      else if (Array.isArray(s.mayWrite) && s.mayWrite.some(p => typeof p === 'string' && !p.startsWith('.devcrew/'))) {
-        errors.push(`Step "${s.id}": a step before the planner may only write under .devcrew/ (reports and notes, not code).`);
-      }
-    });
-    if (!(iQa < iBuild)) { errors.push('"qa" must come before "build": tests are written before the code.'); }
-    const afterPlanner = steps[iPlanner + 1];
-    if (afterPlanner?.type !== 'gate' || afterPlanner.review !== 'plan') {
-      errors.push('The step right after the planner must be a gate with "review": "plan", so you approve the spec and architecture before anything is built.');
-    }
-    if (lastStep.type !== 'gate' || lastStep.review !== 'code') {
-      errors.push('The last step must be a gate with "review": "code", so you approve the code before it is committed.');
-    }
   }
 
   steps.forEach((s, i) => {
@@ -244,22 +215,18 @@ export function validatePipeline(raw: unknown): string[] {
     }
     if (s.type === 'gate') {
       if (typeof s.title !== 'string' || !s.title.trim()) { errors.push(`${where}: "title" is required.`); }
-      const reviews = design ? ['design'] : def.kind === 'fast' ? ['architecture', 'code'] : ['plan', 'code'];
+      const reviews = design ? ['design'] : ['architecture', 'code'];
       if (!reviews.includes(s.review)) {
         errors.push(`${where}: "review" must be ${reviews.map(r => `"${r}"`).join(' or ')} in this kind of pipeline.`);
       }
       if (s.review === 'code' && i < iBuild) { errors.push(`${where}: a code review gate must come after "build".`); }
-      if (s.review === 'plan' && i > iBuild) { errors.push(`${where}: a plan review gate must come before "build".`); }
       const target = steps.find(t => t.id === s.reviseTo);
       if (!target) { errors.push(`${where}: "reviseTo" must name an earlier step (got "${s.reviseTo}").`); }
       else if (index(target.id) >= i) { errors.push(`${where}: "reviseTo" must point back to an earlier step.`); }
       else if (target.type === 'gate') { errors.push(`${where}: "reviseTo" cannot be another gate.`); }
-      else if (s.review === 'plan' && target.type !== 'planner' && !(target.type === 'agent' && index(target.id) < iBuild)) {
-        errors.push(`${where}: a plan review sends feedback to "planner" or to an agent step before "build".`);
-      }
     }
     if (s.type === 'qa' && s.blind !== undefined && typeof s.blind !== 'boolean') { errors.push(`${where}: "blind" must be true or false.`); }
-    if ((s.type === 'planner' || s.type === 'qa' || s.type === 'build') && s.guide !== undefined) {
+    if ((s.type === 'qa' || s.type === 'build') && s.guide !== undefined) {
       const guide = guideName(s.guide);
       if (!guide) { errors.push(`${where}: "guide" must be "guide:<name>" (lowercase letters, digits and -).`); }
       else if (!existsSync(guidePath(guide))) { errors.push(`${where}: no role guide pipelines/roles/${guide}.md.`); }
@@ -298,7 +265,7 @@ export function validatePipeline(raw: unknown): string[] {
           errors.push(`${where}: "verdict.file" must be one of the paths in "mayWrite".`);
         }
         if (v.onChanges !== 'dev' && v.onChanges !== 'continue') { errors.push(`${where}: "verdict.onChanges" must be "dev" or "continue".`); }
-        if (v.onChanges === 'dev' && i < iBuild) { errors.push(`${where}: only steps after "build" can send work back to Dev.`); }
+        if (v.onChanges === 'dev' && i < iBuild) { errors.push(`${where}: only steps after "build" can send work back to the Builder.`); }
         if (v.maxRounds !== undefined && !(Number.isInteger(v.maxRounds) && v.maxRounds >= 1 && v.maxRounds <= 5)) {
           errors.push(`${where}: "verdict.maxRounds" must be a whole number from 1 to 5.`);
         }

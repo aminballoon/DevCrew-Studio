@@ -50,7 +50,7 @@ const USAGE = `Usage: npm run bench -- --tasks <id,...|all> --arms <id,...> [--r
 const { values } = parseArgs({
   options: {
     tasks: { type: 'string', default: 'all' },
-    arms: { type: 'string', default: 'single-vanilla,single-process,multi-same' },
+    arms: { type: 'string', default: 'single-vanilla,multi-fast' },
     reps: { type: 'string', default: '1' },
     profile: { type: 'string' },
     suite: { type: 'string' },

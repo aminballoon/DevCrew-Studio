@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Scripted ACP agent for demos and harness tests: no model, no quota.
 // FAKE_SCRIPT points to a module whose default export maps a turn key to a list of turns:
-//   "planner", "qa", "reviewer", "single", or "dev:<module>" (indexed by attempt).
+//   "qa", "dev:main", "architect", "reviewer", "single", or any agent step id, each turn in order.
 // Each turn writes files directly (as real agents do with their own tools), reports
 // tool calls, a message and usage, so the dashboard and guards see realistic traffic.
 import { spawn } from 'node:child_process';
@@ -30,15 +30,16 @@ class FakeAgent {
     const h = text.match(/\[devcrew role=(\S+) module=(\S+) attempt=(\d+)\]/);
     const role = h?.[1] ?? 'single';
     const key = role === 'dev' ? `dev:${h[2]}` : role;
-    // Counted per workspace, not per process: DevCrew may give a role a fresh session mid-run
-    const countFile = path.join(os.tmpdir(), `devcrew-fake-calls-${createHash('sha1').update(this.cwd).digest('hex').slice(0, 12)}.json`);
-    let counts = {};
-    try { counts = JSON.parse(fs.readFileSync(countFile, 'utf8')); } catch { /* first turn in this workspace */ }
-    const n = counts[key] ?? 0;
-    fs.writeFileSync(countFile, JSON.stringify({ ...counts, [key]: n + 1 }));
+    // Counted per run, not per process (DevCrew may give a role a fresh session mid-run) and not per
+    // folder (QA's first turn works in the run's qa-workspace copy, its later ones in the workspace)
+    const run = path.basename(this.cwd) === 'qa-workspace' ? path.basename(path.dirname(this.cwd)) : path.basename(this.cwd);
+    // One file per role, since QA and the Builder take turns at the same time
+    const countFile = path.join(os.tmpdir(), `devcrew-fake-calls-${createHash('sha1').update(`${run}:${key}`).digest('hex').slice(0, 12)}`);
+    let n = 0;
+    try { n = Number(fs.readFileSync(countFile, 'utf8')) || 0; } catch { /* first turn of this role in this run */ }
+    fs.writeFileSync(countFile, String(n + 1));
     const turns = script.turns[key] ?? [];
-    const index = role === 'dev' ? Number(h[3]) - 1 : n;
-    const turn = turns[Math.min(index, turns.length - 1)];
+    const turn = turns[Math.min(n, turns.length - 1)];
     const send = update => this.conn.sessionUpdate({ sessionId, update });
 
     if (!turn) {
@@ -57,7 +58,7 @@ class FakeAgent {
       await delay(delayMs / 2);
       const full = path.join(this.cwd, rel);
       fs.mkdirSync(path.dirname(full), { recursive: true });
-      fs.writeFileSync(full, rel === '.devcrew/plan.json' ? withCoverage(content, text, turn.files, this.cwd) : content);
+      fs.writeFileSync(full, content);
       await send({ sessionUpdate: 'tool_call_update', toolCallId: id, title: `Write ${rel}`, status: 'completed' });
     }
     for (const title of turn.commands ?? []) {
@@ -79,14 +80,3 @@ class FakeAgent {
 
 const stream = acp.ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin));
 new acp.AgentSideConnection(conn => new FakeAgent(conn), stream);
-
-/** Scripted plans predate requirement coverage: map every clause the prompt lists to the PRD's first criterion. */
-function withCoverage(content, prompt, files, cwd) {
-  const plan = JSON.parse(content);
-  const ids = [...new Set(prompt.match(/^\s*R-\d+(?=:)/gm)?.map(s => s.trim()) ?? [])];
-  const prdPath = path.join(cwd, '.devcrew/PRD.md');
-  const prd = files['.devcrew/PRD.md'] ?? (fs.existsSync(prdPath) ? fs.readFileSync(prdPath, 'utf8') : '');
-  const ac = prd.match(/\bAC-\d+\b/)?.[0];
-  if (!plan.coverage && ids.length && ac) { plan.coverage = Object.fromEntries(ids.map(id => [id, [ac]])); }
-  return JSON.stringify(plan, null, 2);
-}

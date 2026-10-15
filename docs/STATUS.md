@@ -8,8 +8,13 @@
 - Fast pipelines may now open with research roles (agent steps writing only under `.devcrew/`).
 - Dashboard config sent the old standard pipeline and broke the whole page once it was deleted; it now sends `fast`.
 - Data cleanup: 20 old result suites and 217 of their workspaces deleted (`.devcrew-data` 19 GB to 470 MB); the 14 suites STATUS cites are kept.
-- Next: remove the Planner engine (graph nodes, prompts, fake scripts and the tests that use it).
-- Tests: 67.
+- **Planner removed for good:** its graph nodes (planner, per-module dev and verify, replans), prompts, plan.json reading and coverage checks, the plan gate in the dashboard and on Discord, the "Code architecture" card, nine fake scripts and their profiles, and the tests built on them. Kinds are now `fast` and `design`; escalation answers are retry or abort. The general behaviours those tests covered now run on fast: a security add-on sending code back, a wrong hidden test going back to QA, an unattended run failing with its reason, cleanup after a crash, fresh sessions, resume.
+- **Bugs found on the way, fixed:**
+  - A relative `DEVCREW_DATA` (the dashboard-quiet launch config) gave agents a relative working folder; QA's tests landed elsewhere and every fast run failed. DATA_ROOT is now always absolute.
+  - The Builder could edit what research roles left in `.devcrew/` (a HIL rig it could bend to pass); it may not any more.
+  - The fake agent picked the Builder's turn by attempt number, which restarts after a reviewer sends the code back, and QA and the Builder overwrote each other's turn counts when they ran at the same time.
+- Benchmark tab compares the arms that exist now: one AI, fast, fast-arch and the three outside workflows.
+- Tests: 55 (fewer, because the Planner's tests went with it).
 
 ## Latest changes (2026-10-15, other people's workflows on the same tasks)
 `ext-*` arms (`bench/runner/external.ts`) run an outside workflow on its own, on the same workspace and prompt as the single arm, all on Claude Haiku 5.5 through the same proxy; DevCrew only grades with the same hidden tests. Tokens come from Claude Code's transcripts of every session (lead, subagents, teammates), counted as DevCrew counts them; cost from Haiku 5.5 list prices read off a `claude -p` result.

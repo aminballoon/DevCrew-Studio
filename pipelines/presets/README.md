@@ -42,7 +42,7 @@ Everything is in `devcrew.config.json`:
   adding an entry here.
 - `profiles`: which agent plays each role. You pick the profile when you start a run. A role gets
   its agent from, in order:
-  1. the profile's entry for that role: a built-in role (`planner`, `qa`, `dev`, `reviewer`) or a
+  1. the profile's entry for that role: a built-in role (`qa`, `dev`, `reviewer`) or a
      pipeline step's id (`scout`, `hil`, `arch`...),
   2. the `"agent"` the pipeline step names (each preset page lists them),
   3. the profile's `reviewer`.
@@ -51,7 +51,7 @@ So to move a preset to another vendor, add a profile; the pipeline does not chan
 profile where Codex does everything in `system-integration`:
 
 ```json
-"codex-design": { "planner": "codex", "qa": "codex", "dev": "codex", "reviewer": "codex",
+"codex-design": { "qa": "codex", "dev": "codex", "reviewer": "codex",
                   "architect": "codex", "scout": "codex", "arch": "codex" }
 ```
 

@@ -7,7 +7,7 @@ import { getBus } from './orchestrator/runtime';
 
 const USAGE = `Usage:
   npm run run -- start --requirement <file> [--source <dir>] [--profile <name>] [--pipeline single|<id>] [--addons a,b] [--auto]
-  npm run run -- gate <runId> <approve|revise|retry|replan|abort> [--feedback <text>]
+  npm run run -- gate <runId> <approve|revise|retry|abort> [--feedback <text>]
   npm run run -- resume <runId>     continue a run whose process stopped mid-way
   npm run run -- list
 

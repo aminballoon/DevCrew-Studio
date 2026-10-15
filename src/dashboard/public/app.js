@@ -53,10 +53,8 @@ function md(src) {
 // ---------- Stages ----------
 
 const STAGES = {
-  planner: { name: 'Planner', color: 'planner' },
-  gate_spec: { name: 'Review the spec and plan', gate: 'plan' },
   qa: { name: 'QA', color: 'qa' },
-  dev: { name: 'Dev', color: 'dev' },
+  dev: { name: 'Builder', color: 'dev' },
   verify: { name: 'Verify', color: 'system' },
   escalate: { name: 'Escalation', gate: 'escalation' },
   reviewer: { name: 'Reviewer', color: 'reviewer' },
@@ -64,13 +62,13 @@ const STAGES = {
   finish: { name: 'Done' },
   single: { name: 'Single AI', color: 'single' },
 };
-const GATE_NODE = { spec: 'gate_spec', merge: 'gate_merge', escalation: 'escalate' };
+const GATE_NODE = { merge: 'gate_merge', escalation: 'escalate' };
 
-/** The pipeline of the run on screen; runs from before pipelines used the standard one. */
+/** The pipeline of the run on screen. */
 let DEF = null;
 const gateNode = g => GATE_NODE[g] ?? g;
-/** "plan", "code" or "escalation". Runs from before pipelines used the gate ids spec and merge. */
-const gateKind = g => ({ spec: 'plan', merge: 'code', escalation: 'escalation' })[g] ?? DEF?.steps.find(s => s.id === g)?.review ?? 'plan';
+/** "architecture", "code", "design" or "escalation". */
+const gateKind = g => ({ merge: 'code', escalation: 'escalation' })[g] ?? DEF?.steps.find(s => s.id === g)?.review ?? 'code';
 /** Name and colour for any box: built-in stages, and gates and roles from the pipeline file. */
 function stageOf(id) {
   const step = DEF?.steps.find(s => s.id === id);
@@ -78,8 +76,8 @@ function stageOf(id) {
   if (step?.type === 'agent') return { name: step.name, color: id === 'reviewer' ? 'reviewer' : 'custom', step };
   return STAGES[id] ?? { name: id, color: 'custom' };
 }
-const roleClass = r => (['planner', 'qa', 'dev', 'reviewer', 'single'].includes(r) ? r : 'custom');
-const DECISION = { approve: 'Approved', revise: 'Changes requested', retry: 'Retry', replan: 'Back to planning', abort: 'Cancelled' };
+const roleClass = r => (['qa', 'dev', 'reviewer', 'single'].includes(r) ? r : 'custom');
+const DECISION = { approve: 'Approved', revise: 'Changes requested', retry: 'Retry', abort: 'Cancelled' };
 
 // ---------- Steps: the run's log, grouped by which box did the work ----------
 
@@ -122,11 +120,11 @@ function buildModel(events) {
   const started = events.find(e => e.type === 'run_started');
   DEF = started?.pipeline ?? S.config?.defaultPipeline ?? null;
   const steps = buildSteps(events);
-  const m = { def: DEF, steps, status: 'running', stages: {}, edges: {}, lastEdge: null, gate: null, modules: new Map(), plan: null, fixes: 0, guards: 0, tokens: 0, cost: 0, byRole: {} };
+  const m = { def: DEF, steps, status: 'running', stages: {}, edges: {}, lastEdge: null, gate: null, modules: new Map(), fixes: 0, guards: 0, tokens: 0, cost: 0, byRole: {} };
   const st = id => (m.stages[id] ??= { state: 'idle', visits: 0 });
   for (const e of events) {
     if (e.type === 'run_started') Object.assign(m, { started: e.ts, requirement: e.requirement, label: e.label, profile: e.profile, workspace: e.workspace, mode: e.mode });
-    if (e.type === 'gate_waiting') { m.gate = e; if (gateKind(e.gate) === 'plan' && e.payload.plan) m.plan = e.payload.plan; }
+    if (e.type === 'gate_waiting') m.gate = e;
     if (e.type === 'gate_resolved' || e.type === 'run_finished') m.gate = null;
     if (e.type === 'verify_result') { m.lastVerify = e; if (!e.passed) m.fixes++; }
     if (e.type === 'guard_violation') m.guards += e.files.length;
@@ -146,7 +144,7 @@ function buildModel(events) {
   let prevNode = null, prevPassed = true;
   for (const s of steps) {
     if (s.node === 'start') continue;
-    // Edges walked, for the diagram: verify → dev is either a fix or the next module
+    // Edges walked, for the diagram: verify → dev is a fix after a failed check
     if (prevNode && prevNode !== s.node) {
       const kind = (s.node === 'dev' || s.node === 'single') && prevNode === 'verify' ? (prevPassed ? ':next' : ':fix') : '';
       const key = `${prevNode}>${s.node}${kind}`;
@@ -185,10 +183,10 @@ function buildModel(events) {
 function nowSentence(m) {
   if (m.status === 'waiting' && m.gate) {
     const title = stageOf(gateNode(m.gate.gate)).name;
-    if (gateKind(m.gate.gate) === 'plan') return ['wait', `Waiting for you to review the spec and plan (“${title}”). Approve or ask for changes in the box below.`];
+    if (gateKind(m.gate.gate) === 'architecture') return ['wait', `Waiting for you to review the architecture (“${title}”). The modules, rules and contracts are in the box below.`];
     if (gateKind(m.gate.gate) === 'design') return ['wait', `Waiting for you to review the design (“${title}”). The system diagram and reports are in the box below.`];
     if (gateKind(m.gate.gate) === 'code') return ['wait', `The AI team is done. Waiting for your decision (“${title}”). The changed files and reviews are in the box below.`];
-    return ['bad', `Dev tried module ${m.gate.payload.module} ${m.gate.payload.attempts} times and it still fails. Your decision is needed.`];
+    return ['bad', `${m.gate.payload.title ?? `The Builder tried ${m.gate.payload.attempts} times and it still fails`}. Your decision is needed.`];
   }
   const sum = `${m.lastVerify ? `${m.lastVerify.tests.pass}/${m.lastVerify.tests.total} tests passing · ` : ''}took ${fmtDur((m.endedAt ?? Date.now()) - m.started)} · ${fmtTok(m.tokens)} tokens (${fmtUsd(m.cost)})`;
   if (m.status === 'approved') return ['ok', `Done and committed. ${sum}`];
@@ -200,10 +198,9 @@ function nowSentence(m) {
   if (!a) return ['run', 'Starting…'];
   const text = {
     start: 'Preparing the workspace',
-    planner: a.visit > 1 ? 'Planner is updating the plan based on your feedback' : 'Planner is reading the task and making a plan',
-    qa: 'QA is writing tests from the spec (no code exists yet)',
-    dev: `Dev is writing module ${a.module} (attempt ${a.attempt})`,
-    verify: `The system is running the tests${a.module ? ` for module ${a.module}` : ''}`,
+    qa: a.module ? 'QA is checking a hidden test the Builder disputes' : 'QA is writing hidden tests while the Builder builds',
+    dev: `The Builder is working (attempt ${a.attempt ?? 1})`,
+    verify: "The system is running the Builder's tests and QA's hidden ones",
     reviewer: 'Reviewer is checking the code',
     single: a.attempt > 1 ? `The single AI is fixing its work (fix round ${a.attempt - 1})` : 'The single AI is doing the whole task',
   }[a.node] ?? `Working on ${a.node}`;
@@ -241,12 +238,10 @@ const SINGLE_EDGES = [
 function pipelineLayout(def) {
   const nodes = [];
   let gateNo = 0;
-  const fast = def.kind === 'fast';
   for (const s of def.steps) {
-    if (s.type === 'planner') nodes.push({ id: 'planner', label: 'Planner', role: 'PO + ARCHITECT', agentRole: 'planner' });
-    else if (s.type === 'qa') nodes.push({ id: 'qa', label: 'QA', role: fast ? 'HIDDEN TESTS' : 'TESTS FIRST', agentRole: 'qa' });
-    else if (s.type === 'build') nodes.push({ id: 'dev', label: fast ? 'Builder' : 'Developer', role: fast ? 'SAME TIME AS QA' : 'PER MODULE', agentRole: 'dev' }, { id: 'verify', label: 'Verify', role: 'NO AI · JUDGE' });
-    else if (s.type === 'gate') nodes.push({ id: s.id, label: `Gate ${++gateNo}`, gate: true, sub: { plan: 'Plan', code: 'Code', design: 'Design', architecture: 'Architecture' }[s.review] });
+    if (s.type === 'qa') nodes.push({ id: 'qa', label: 'QA', role: 'HIDDEN TESTS', agentRole: 'qa' });
+    else if (s.type === 'build') nodes.push({ id: 'dev', label: 'Builder', role: 'SAME TIME AS QA', agentRole: 'dev' }, { id: 'verify', label: 'Verify', role: 'NO AI · JUDGE' });
+    else if (s.type === 'gate') nodes.push({ id: s.id, label: `Gate ${++gateNo}`, gate: true, sub: { code: 'Code', design: 'Design', architecture: 'Architecture' }[s.review] });
     else nodes.push({
       id: s.id, label: s.name.length > 15 ? `${s.name.slice(0, 14)}…` : s.name, agentRole: s.id,
       role: s.instructions === 'builtin:reviewer' ? 'CODE REVIEW' : s.verdict?.onChanges === 'dev' ? 'CAN SEND BACK' : 'ADVISORY',
@@ -262,16 +257,16 @@ function pipelineLayout(def) {
     if (s.type === 'gate') edges.push([s.id, s.reviseTo === 'build' ? 'dev' : s.reviseTo, 'back', s.reviseTo === 'build' ? 'changes' : 'revise', arcAbove(0, s.reviseTo === 'build' ? -4 : 20)]);
     if (s.type === 'agent' && s.verdict?.onChanges === 'dev') edges.push([s.id, 'dev', 'back', 'changes', arcAbove(0, -12)]);
   }
-  // A design pipeline builds nothing: no Dev, Verify or escalation
+  // A design pipeline builds nothing: no Builder, Verify or escalation
   if (!dev) return { nodes, edges, width };
   nodes.push({ id: 'escalate', x: (dev.x + verify.x) / 2, y: 240, label: 'Escalate', gate: true, sub: 'Human' });
   edges.push(
     ['verify', 'dev', 'back fix', 'fix', arcAbove(0, 22)],
-    ['dev', 'planner', 'back', 'spec issue', arcAbove(-22, -20)],
-    ['verify', 'dev', 'back next', 'next module', (a, b) => [{ x: a.x - 20, y: bottom(a).y }, { x: (a.x + b.x) / 2, y: 200 }, { x: b.x + 20, y: bottom(b).y }]],
+    // A hidden test the Builder disputes, or that failed twice, goes to QA to check
+    ['verify', 'qa', 'back', 'check test', arcAbove(-22, 20)],
+    ['dev', 'qa', 'back', 'dispute', (a, b) => [{ x: a.x - 20, y: bottom(a).y }, { x: (a.x + b.x) / 2, y: 200 }, { x: b.x + 20, y: bottom(b).y }]],
     ['verify', 'escalate', 'back', '', (a, b) => [{ x: a.x + 10, y: bottom(a).y }, { x: a.x + 10, y: b.y }, right(b)]],
     ['escalate', 'dev', 'back', 'retry', (a, b) => [left(a), { x: b.x - 10, y: a.y }, { x: b.x - 10, y: bottom(b).y }]],
-    ['escalate', 'planner', 'back', 'replan', (a, b) => [left(a), { x: b.x, y: a.y }, bottom(b)]],
   );
   return { nodes, edges, width };
 }
@@ -313,7 +308,7 @@ function renderPipeline(m, preview = false) {
     if (n.id === 'escalate' && !st.visits) continue;
     const { x, y } = pos(n.id);
     let sub = n.agentRole ? roles[n.agentRole] ?? (DEF?.steps.find(s => s.id === n.id)?.agent ?? roles.reviewer ?? '') : '';
-    if (preview) sub = n.agentRole && !['planner', 'qa', 'dev'].includes(n.agentRole) ? DEF?.steps.find(s => s.id === n.id)?.agent ?? '' : '';
+    if (preview) sub = n.agentRole && !['qa', 'dev'].includes(n.agentRole) ? DEF?.steps.find(s => s.id === n.id)?.agent ?? '' : '';
     if (n.id === 'dev' && st.now) sub = st.now;
     if (n.id === 'verify' && st.lastVerify) sub = `${st.lastVerify.tests.pass}/${st.lastVerify.tests.total} tests ${st.lastVerify.passed ? 'pass' : 'fail'}`;
     if (n.id === 'single' && st.visits > 1) sub = `${roles.single ?? ''} · ${plural(st.visits, 'turn')}`;
@@ -359,8 +354,6 @@ function renderRun() {
     <div class="stats" id="stats"></div>
     <section class="card pipeline"><div class="card-head"><h3>Pipeline</h3><span class="hint">Click a box to see what that role received, did and handed on</span></div>
       <div class="pipeline-wrap" id="flow"></div></section>
-    <section class="card" id="arch-card"><div class="card-head"><h3>Code architecture <span class="hint">designed by the Planner, reviewed by you at Gate 1</span></h3><span class="hint" id="arch-status"></span></div>
-      <div class="card-body" id="arch"></div></section>
     <section class="card" id="design-card" hidden><div class="card-head"><h3>System design and reports <span class="hint">what the roles wrote, kept after every gate</span></h3><span class="hint" id="design-status"></span></div>
       <div class="card-body" id="design"></div></section>
     <section class="card"><div class="card-head"><h3>What happened, in plain words</h3><span class="hint">For anyone, no coding knowledge needed</span></div>
@@ -376,7 +369,6 @@ function renderRun() {
       </div>
     </div>`;
   S.gateKey = null;
-  S.archKey = null;
   S.designKey = null;
   S.designTab = null;
   update(true);
@@ -396,18 +388,15 @@ function update(first = false) {
   renderResume(m);
   // A design pipeline writes no code: no tests, modules or code architecture to show
   const design = DEF?.kind === 'design';
-  // A fast run has no Planner, so no designed architecture to show
-  $('#arch-card').hidden = design || DEF?.kind === 'fast';
   $('#modules-card').hidden = design;
   $('#stats').innerHTML = [
     ['Time', `<span data-elapsed="${m.started}" data-ended="${m.endedAt ?? ''}">${fmtDur((m.endedAt ?? Date.now()) - m.started)}</span>`, ''],
     ['Tokens', fmtTok(m.tokens), 'How much text the AIs read and wrote, in total'],
     ['Cost (API price)', fmtUsd(m.cost), 'What this would cost at API prices, even though we pay a monthly plan'],
     ['Tests passing', m.lastVerify ? `${m.lastVerify.tests.pass}<small> / ${m.lastVerify.tests.total}</small>` : '–', 'Latest check'],
-    ['Fix rounds · Files blocked', `${m.fixes} <small>·</small> ${m.guards}`, 'Times the tests failed and work went back to Dev · files an AI tried to change without permission'],
+    ['Fix rounds · Files blocked', `${m.fixes} <small>·</small> ${m.guards}`, 'Times the tests failed and work went back to the Builder · files an AI tried to change without permission'],
   ].filter(([l]) => !design || !['Tests passing', 'Fix rounds · Files blocked'].includes(l)).map(([l, v, h]) => `<div class="stat" ${h ? `title="${h}"` : ''}><div class="label">${l}</div><div class="value">${v}</div></div>`).join('');
   $('#flow').innerHTML = renderPipeline(m);
-  renderArchCard(m);
   renderDesignCard(m);
   renderStory(m);
   renderHandoffs(m);
@@ -417,222 +406,6 @@ function update(first = false) {
   renderGate(m);
 }
 
-
-// ---------- Code architecture: the planned files as a UML-style diagram ----------
-
-const KIND_WRITER = { contract: 'planner', doc: 'planner', source: 'dev', config: 'dev', test: 'qa' };
-const KIND_ORDER = { contract: 0, config: 1, source: 2, doc: 3, test: 4 };
-
-/** The architecture from the latest plan.json the Planner handed over. */
-/** Acceptance criteria in a PRD: "AC-3" → the rest of its line, without markdown emphasis. */
-function prdCriteria(prd) {
-  const out = new Map();
-  for (const line of (prd ?? '').split('\n')) {
-    const m = line.match(/\b(AC-\d+)\b\**\s*[:.)—–-]?\s*\**\s*(.*)$/);
-    if (m && !out.has(m[1])) out.set(m[1], m[2].replace(/[*_`]/g, '').trim());
-  }
-  return out;
-}
-
-/** Each requirement clause with the criteria the Planner says cover it (runs from before clauses have none). */
-function coverageRows(payload) {
-  const clauses = payload.clauses ?? [];
-  const coverage = payload.plan?.coverage ?? {};
-  const criteria = prdCriteria(payload.prd);
-  const rows = clauses.map(c => ({ ...c, acs: (coverage[c.id] ?? []).map(id => ({ id, text: criteria.get(id), known: criteria.has(id) })) }));
-  const linked = new Set(rows.flatMap(r => r.acs.map(a => a.id)));
-  const extra = [...criteria].filter(([id]) => !linked.has(id)).map(([id, text]) => ({ id, text }));
-  return { rows, extra, covered: rows.filter(r => r.acs.some(a => a.known)).length };
-}
-
-function coverageButton(payload) {
-  if (!payload.clauses?.length) return '';
-  const { rows, covered } = coverageRows(payload);
-  return `<button type="button" data-pane="coverage">Requirement coverage (${covered}/${rows.length})</button>`;
-}
-
-function coveragePane(payload) {
-  if (!payload.clauses?.length) return '';
-  const { rows, extra, covered } = coverageRows(payload);
-  const chip = a => `<span class="chip ${a.known ? '' : 'bad'}" title="${esc(a.known ? a.text : 'Not found in the spec')}">${esc(a.id)}</span>`;
-  return `<div data-pane="coverage" hidden>
-    <p class="hint">Your requirement, split into its sentences, and the acceptance criteria in the spec that cover each one. QA tests these criteria, and every role also gets your sentences as the final word. Check that each criterion says everything its sentence says; hover a criterion to read it.</p>
-    ${covered < rows.length ? `<div class="banner warn">${plural(rows.length - covered, 'sentence')} of your requirement ${rows.length - covered === 1 ? 'is' : 'are'} not covered by the spec.</div>` : ''}
-    <div class="table-wrap"><table class="results coverage-table">
-      <thead><tr><th>#</th><th>Your requirement</th><th>Covered by</th></tr></thead>
-      <tbody>${rows.map(r => `<tr class="${r.acs.some(a => a.known) ? '' : 'uncovered'}"><td>${esc(r.id)}</td><td class="wrap">${r.text.includes('\n') ? `<pre>${esc(r.text)}</pre>` : esc(r.text)}</td><td class="acs">${r.acs.length ? r.acs.map(chip).join(' ') : '<span class="chip bad">None</span>'}</td></tr>`).join('')}</tbody>
-    </table></div>
-    ${extra.length ? `<h4 style="margin-top:14px">Added by the Planner (${extra.length})</h4><p class="hint">Criteria in the spec that no sentence of your requirement asks for. They can be sensible details or scope you did not ask for.</p>
-      <ul class="coverage-extra">${extra.map(a => `<li><span class="chip">${esc(a.id)}</span> ${esc(a.text)}</li>`).join('')}</ul>` : ''}
-  </div>`;
-}
-
-function plannedArchitecture() {
-  const versions = archVersions();
-  return (versions.find(x => x.version === S.archVersion) ?? versions.at(-1))?.files ?? null;
-}
-
-const relation = (from, to) => from.kind === 'test' ? 'tests' : to.kind === 'contract' ? 'implements' : 'uses';
-
-/**
- * Files in columns by dependency depth: what others build on sits on the left,
- * what uses it to the right. Arrows are drawn afterwards by drawArch().
- * `built` (optional) maps path to the role that wrote it, to show progress.
- */
-function renderArch(files, built, plan, changes = null) {
-  if (!files?.length) return '<p class="hint">The Planner has not described the files yet.</p>';
-  const byPath = new Map(files.map(f => [f.path, f]));
-  const level = new Map();
-  const depth = (f, seen = new Set()) => {
-    if (level.has(f.path)) return level.get(f.path);
-    if (seen.has(f.path)) return 0;
-    seen.add(f.path);
-    const deps = (f.dependsOn ?? []).map(d => byPath.get(d)).filter(Boolean);
-    const d = deps.length ? 1 + Math.max(...deps.map(x => depth(x, seen))) : 0;
-    level.set(f.path, d);
-    return d;
-  };
-  files.forEach(f => depth(f));
-  // Tests sit together in the last column, right of everything they check
-  const lastCode = Math.max(0, ...files.filter(f => f.kind !== 'test').map(f => level.get(f.path)));
-  for (const f of files) if (f.kind === 'test') level.set(f.path, lastCode + 1);
-  const cols = [];
-  for (const f of files) (cols[level.get(f.path)] ??= []).push(f);
-  const partName = id => plan?.modules?.find(m => m.id === id)?.title ?? id;
-  const box = f => {
-    const name = f.path.split('/').pop(), dir = f.path.slice(0, -name.length);
-    const writer = KIND_WRITER[f.kind] ?? 'dev';
-    const state = !built ? '' : built.has(f.path)
-      ? `<span class="arch-state ok">Built by ${COLUMN_NAME[built.get(f.path)] ?? built.get(f.path)}</span>`
-      : '<span class="arch-state">Not built yet</span>';
-    const tag = changes?.added.includes(f.path) ? '<span class="uml-new">New</span>' : changes?.changed.includes(f.path) ? '<span class="uml-new changed">Changed</span>' : '';
-    return `<div class="uml ${f.kind} ${tag ? 'is-new' : ''}" data-arch="${esc(f.path)}">
-      <div class="uml-head">${tag}<span class="uml-kind">«${esc(f.kind)}»</span><b>${esc(name)}</b><span class="uml-dir">${esc(dir)}</span></div>
-      <div class="uml-sec">${esc(f.purpose)}</div>
-      ${f.exports?.length ? `<div class="uml-sec uml-exports">${f.exports.map(x => `<div>+ ${esc(x)}</div>`).join('')}</div>` : ''}
-      <div class="uml-foot"><span>${f.modules?.length ? `Part: ${f.modules.map(partName).map(esc).join(', ')}` : 'Shared by all parts'}</span><span>Written by ${COLUMN_NAME[writer]}</span>${state}</div>
-    </div>`;
-  };
-  const extra = built ? [...built.keys()].filter(p => !byPath.has(p) && !p.startsWith('.devcrew/')) : [];
-  return `<div class="arch">
-      <div class="arch-cols">${cols.filter(Boolean).map(c => `<div class="arch-col">${c.sort((a, b) => (KIND_ORDER[a.kind] ?? 9) - (KIND_ORDER[b.kind] ?? 9) || a.path.localeCompare(b.path)).map(box).join('')}</div>`).join('')}</div>
-      <svg class="arch-edges"></svg>
-    </div>
-    <div class="legend arch-legend"><span><i class="ln implements"></i>implements (follows the contract)</span><span><i class="ln uses"></i>uses</span><span><i class="ln tests"></i>tests</span>
-      <span><i class="sw k-contract"></i>contract</span><span><i class="sw k-source"></i>source</span><span><i class="sw k-test"></i>test</span><span><i class="sw k-config"></i>config / doc</span></div>
-    ${extra.length ? `<div class="banner warn">Not in the approved architecture: ${extra.map(p => `<code>${esc(p)}</code>`).join(', ')}</div>` : ''}
-    <details class="arch-table"><summary>Every file in a table</summary><div class="table-wrap"><table class="results">
-      <tr><th>File</th><th>Type</th><th>Part</th><th>Written by</th><th>What it does</th><th>Uses</th>${built ? '<th>Status</th>' : ''}</tr>
-      ${files.map(f => `<tr><td><code>${esc(f.path)}</code></td><td>${esc(f.kind)}</td><td>${f.modules?.length ? f.modules.map(partName).map(esc).join(', ') : 'all'}</td>
-        <td>${COLUMN_NAME[KIND_WRITER[f.kind]] ?? ''}</td><td class="wrap">${esc(f.purpose)}</td><td>${(f.dependsOn ?? []).map(d => `<code>${esc(d)}</code>`).join(' ') || '–'}</td>
-        ${built ? `<td>${built.has(f.path) ? '<span class="yes">Built</span>' : '<span class="hint">Not yet</span>'}</td>` : ''}</tr>`).join('')}
-    </table></div></details>`;
-}
-
-/** Draw the dependency arrows between the boxes once they are laid out. */
-function drawArch(root, files) {
-  const wrap = root?.querySelector('.arch');
-  if (!wrap || !files) return;
-  const svg = wrap.querySelector('.arch-edges');
-  const base = wrap.getBoundingClientRect();
-  svg.setAttribute('width', wrap.scrollWidth);
-  svg.setAttribute('height', wrap.scrollHeight);
-  const rect = path => {
-    const el = wrap.querySelector(`.uml[data-arch="${CSS.escape(path)}"]`);
-    if (!el) return null;
-    const r = el.getBoundingClientRect();
-    return { l: r.left - base.left + wrap.scrollLeft, r: r.right - base.left + wrap.scrollLeft, t: r.top - base.top, b: r.bottom - base.top };
-  };
-  const byPath = new Map(files.map(f => [f.path, f]));
-  let paths = '';
-  for (const f of files) {
-    for (const d of f.dependsOn ?? []) {
-      const to = byPath.get(d), a = rect(f.path), b = rect(d);
-      if (!to || !a || !b) continue;
-      const rel = relation(f, to);
-      // From the user (right) to what it relies on (left)
-      const x1 = a.l, y1 = (a.t + a.b) / 2, x2 = b.r, y2 = (b.t + b.b) / 2, mx = (x1 + x2) / 2;
-      paths += `<path class="arch-edge ${rel}" d="M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2 + 2} ${y2}" marker-end="url(#arch-${rel})"/>`;
-    }
-  }
-  svg.innerHTML = `<defs>
-    <marker id="arch-implements" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="11" markerHeight="11" orient="auto"><path d="M1 1L11 6L1 11z" class="arch-head hollow"/></marker>
-    <marker id="arch-uses" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0L10 5L0 10" class="arch-head open"/></marker>
-    <marker id="arch-tests" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0L10 5L0 10" class="arch-head open"/></marker>
-  </defs>${paths}`;
-}
-
-/**
- * Every architecture the Planner handed over, oldest first, with what happened at review:
- * { version, seq, ts, plan, files, review: { decision, feedback, auto, ts } | null }.
- */
-function archVersions() {
-  const versions = [];
-  for (const e of S.events) {
-    if (e.type === 'agent_output' && e.role === 'planner') {
-      const f = e.files.find(x => x.path === '.devcrew/plan.json');
-      if (!f?.content) continue;
-      let plan = null;
-      try { plan = JSON.parse(f.content); } catch { continue; }
-      if (!plan?.architecture?.files?.length) continue;
-      // A fix of an invalid plan within the same review round replaces the previous version
-      const last = versions.at(-1);
-      if (last && !last.review) versions.pop();
-      versions.push({ version: versions.length + 1, seq: e.seq, ts: e.ts, plan, files: plan.architecture.files, review: null });
-    }
-    if (e.type === 'gate_resolved' && gateKind(e.gate) === 'plan' && versions.at(-1) && !versions.at(-1).review) {
-      versions.at(-1).review = { decision: e.decision, feedback: e.feedback, ts: e.ts, auto: !S.events.some(x => x.type === 'gate_waiting' && x.gate === e.gate && x.seq < e.seq && x.seq > versions.at(-1).seq) };
-    }
-  }
-  return versions;
-}
-
-/** What changed between two versions of the design. */
-function archDiff(prev, next) {
-  if (!prev) return null;
-  const a = new Map(prev.files.map(f => [f.path, f])), b = new Map(next.files.map(f => [f.path, f]));
-  const added = [...b.keys()].filter(p => !a.has(p));
-  const removed = [...a.keys()].filter(p => !b.has(p));
-  const changed = [...b.keys()].filter(p => a.has(p) && JSON.stringify(a.get(p)) !== JSON.stringify(b.get(p)));
-  return { added, removed, changed };
-}
-
-function diffBanner(v, prev) {
-  const d = archDiff(prev, v);
-  if (!d) return '';
-  const fb = prev.review?.feedback ? ` after you asked: ${quote(prev.review.feedback)}` : '';
-  if (!d.added.length && !d.removed.length && !d.changed.length) return `<div class="banner info">Version ${v.version}${fb}. No file changes from version ${prev.version}.</div>`;
-  return `<div class="banner info">Version ${v.version}${fb}. Compared with version ${prev.version}:
-    ${d.added.length ? `<div><b>Added</b> ${d.added.map(p => `<code>${esc(p)}</code>`).join(', ')}</div>` : ''}
-    ${d.removed.length ? `<div><b>Removed</b> ${d.removed.map(p => `<code>${esc(p)}</code>`).join(', ')}</div>` : ''}
-    ${d.changed.length ? `<div><b>Changed</b> ${d.changed.map(p => `<code>${esc(p)}</code>`).join(', ')}</div>` : ''}</div>`;
-}
-
-function reviewText(v, m) {
-  if (!v.review) return m.gate && gateKind(m.gate.gate) === 'plan' ? 'Waiting for your review at Gate 1' : 'Not reviewed yet';
-  if (v.review.auto && v.review.decision === 'approve') return `Approved automatically (benchmark mode) at ${fmtTime(v.review.ts)}`;
-  if (v.review.decision === 'approve') return `Approved by you at ${fmtTime(v.review.ts)}`;
-  if (v.review.decision === 'revise') return `You asked for changes at ${fmtTime(v.review.ts)}`;
-  return `Rejected at ${fmtTime(v.review.ts)}`;
-}
-
-function renderArchCard(m) {
-  const el = $('#arch');
-  const versions = archVersions();
-  const built = new Map([...latestFiles()].map(([p, f]) => [p, f.role]));
-  if (S.archVersion && !versions.some(v => v.version === S.archVersion)) S.archVersion = null;
-  const v = versions.find(x => x.version === S.archVersion) ?? versions.at(-1);
-  const key = JSON.stringify([versions.map(x => [x.seq, x.review]), v?.version, [...built.keys()].sort(), m.status]);
-  if (key === S.archKey) return;
-  S.archKey = key;
-  $('#arch-status').textContent = v ? `Version ${v.version} · ${reviewText(v, m)}` : '';
-  if (!v) { el.innerHTML = '<p class="hint">The Planner proposes the architecture together with the spec, and sends both to you at Gate 1.</p>'; return; }
-  const isLatest = v === versions.at(-1);
-  el.innerHTML = `${versions.length > 1 ? `<div class="subtabs">${versions.map(x => `<button type="button" class="${x === v ? 'on' : ''}" data-arch-version="${x.version}">Version ${x.version} · ${x.review ? (x.review.decision === 'approve' ? 'approved' : x.review.decision === 'revise' ? 'changes asked' : 'rejected') : 'in review'}</button>`).join('')}</div>` : ''}
-    ${diffBanner(v, versions[v.version - 2])}
-    ${renderArch(v.files, isLatest ? built : null, v.plan, archDiff(versions[v.version - 2], v))}`;
-  requestAnimationFrame(() => drawArch(el, v.files));
-}
 
 // ---------- System design and reports: everything the roles wrote under .devcrew/ ----------
 
@@ -717,16 +490,11 @@ function renderStory(m) {
   };
 
   // Facts pulled from the files the roles wrote
-  const prd = files.get('.devcrew/PRD.md')?.content ?? '';
-  const criteria = new Set(prd.match(/\bAC-\d+/g) ?? []).size;
-  let parts = [];
-  try { parts = JSON.parse(files.get('.devcrew/plan.json')?.content ?? '{}').modules ?? []; } catch { /* plan not written yet */ }
   const testFiles = byRole('qa');
   const checks = testFiles.reduce((n, f) => n + countTests(f.content ?? ''), 0);
   const codeLines = byRole(m.mode === 'single' ? 'single' : 'dev').filter(f => !f.path.startsWith('tests/') && !f.path.startsWith('.devcrew/')).reduce((n, f) => n + f.lines, 0);
   const runs = S.events.filter(e => e.type === 'verify_result');
   const failedRuns = runs.filter(e => !e.passed).length;
-  const partTitle = id => parts.find(p => p.id === id)?.title ?? id;
   const gateSteps = m.steps.filter(s => s.gate);
   const decided = g => gateSteps.filter(s => s.gate === g && !s.waiting);
   const task = (m.requirement ?? '').split('\n').find(l => l.trim())?.replace(/[`*#]/g, '').trim() ?? '';
@@ -739,8 +507,7 @@ function renderStory(m) {
 
   const you = col('you', 'You', 'the person in charge', p('Nothing. You start the work.'), [
     p(`A request: ${quote(task.length > 120 ? task.slice(0, 117) + '…' : task)}`),
-    ...decided('spec').map(s => p(s.auto ? 'The plan was approved automatically (test mode).' : s.decision === 'approve' ? 'You approved the plan.' : s.decision === 'revise' ? `You asked for changes to the plan: ${quote(s.feedback ?? '')}` : 'You cancelled the work.')),
-    ...decided('escalation').map(s => p(s.decision === 'retry' ? 'You let the builder try again.' : s.decision === 'replan' ? 'You sent the work back for a new plan.' : 'You stopped the work.')),
+    ...decided('escalation').map(s => p(s.decision === 'retry' ? 'You let the Builder try again.' : 'You stopped the work.')),
     ...decided('merge').map(s => p(s.auto ? 'The final work was accepted automatically (test mode).' : s.decision === 'approve' ? 'You accepted the final work.' : s.decision === 'revise' ? `You asked for changes: ${quote(s.feedback ?? '')}` : 'You rejected the final work.')),
   ].join(''));
 
@@ -753,41 +520,29 @@ function renderStory(m) {
         runs.length ? p(`Ran the checks ${plural(runs.length, 'time')}: ${runs.length - failedRuns} passed, ${failedRuns} failed and went back to be fixed.`) : p('Nothing yet.')),
     ];
   } else {
-    const devParts = [...m.modules].map(([id, mod]) => {
-      const tries = mod.tries.length, ok = mod.tries.at(-1) === 'pass';
-      return `<li>${esc(partTitle(id))}: ${ok ? (tries > 1 ? `done on try ${tries}` : 'done on the first try') : mod.tries.at(-1) === 'fail' ? `not working yet after ${plural(tries, 'try')}` : 'in progress'}</li>`;
-    }).join('');
     const builtIn = {};
-    builtIn.planner = [
-      col('planner', 'Planner', 'turns the request into a plan', status('planner') + p('Your request.') + (stage('planner').visits > 1 ? p('Your comments on the first plan.') : ''),
-        prd || parts.length ? [
-          criteria ? p(`A written plan listing <b>${criteria} things</b> the finished work must do.`) : p('A written plan.'),
-          parts.length ? p(`The work split into <b>${parts.length} ${parts.length === 1 ? 'part' : 'parts'}</b>, built in this order:`) + `<ol class="plain-list">${parts.map(x => `<li>${esc(x.title)}</li>`).join('')}</ol>` : '',
-          p('A precise description of how the pieces fit together, so everyone builds to the same shape.'),
-        ].join('') : p('Nothing yet.'))];
-    const fast = DEF?.kind === 'fast';
     builtIn.qa = [
-      col('qa', 'QA', fast ? 'writes hidden checks while the Builder builds' : 'writes the checks first', status('qa') + p(fast ? 'Your request, and nothing else.' : 'The plan from the Planner.'),
-        checks ? p(`<b>${checks} automatic checks</b>, written before anything was built.`) + p('Nobody can change them afterwards, so they are a fair judge.') : p('Nothing yet.'))];
+      col('qa', 'QA', 'writes hidden checks while the Builder builds', status('qa') + p('Your request, and nothing else.'),
+        checks ? p(`<b>${checks} automatic checks</b>, written before anything was built.`) + p('The Builder never sees them, so they are a fair judge.') : p('Nothing yet.'))];
     builtIn.build = [
-      col('dev', fast ? 'Builder' : 'Developer', fast ? 'plans and builds it, with its own checks' : 'builds it, one part at a time', status('dev') + (fast ? p('Your request.') : p('The plan from the Planner.') + p('The checks from QA, to aim for.')) + (failedRuns ? p(fast ? 'The names of the hidden checks that failed, each time something failed.' : 'A report from the Checker each time something failed.') : ''),
-        m.modules.size ? `${codeLines ? p(`The working software: about <b>${codeLines} lines</b>.`) : ''}<ul class="plain-list">${devParts}</ul>` : p('Nothing yet.'),
-        m.guards ? `<div class="plain-warn">Tried to change the checks ${m.guards === 1 ? 'once' : `${m.guards} times`} to make them easier to pass. The system undid it.</div>` : ''),
-      col('verify', 'Checker', 'the Verify box: the system, not an AI', status('verify') + p(`The software from the ${fast ? 'Builder' : 'Developer'}.`) + p(fast ? "The Builder's own checks and QA's hidden ones." : 'The checks from QA.'),
-        runs.length ? p(`Ran the checks <b>${runs.length === 1 ? 'once' : `${runs.length} times`}</b>: ${runs.length - failedRuns} passed${failedRuns ? `, ${failedRuns} failed and went back to the ${fast ? 'Builder' : 'Developer'} to fix` : ''}.`) : p('Nothing yet.'))];
-    // Every role in pipeline order; runs from before pipelines use the standard one
-    const order = DEF?.steps ?? [{ type: 'planner' }, { type: 'qa' }, { type: 'build' }];
+      col('dev', 'Builder', 'plans and builds it, with its own checks', status('dev') + p('Your request.') + (failedRuns ? p('The names of the hidden checks that failed, each time something failed.') : ''),
+        stage('dev').visits ? (codeLines ? p(`The working software: about <b>${codeLines} lines</b>.`) : p('Work in progress.')) : p('Nothing yet.'),
+        m.guards ? `<div class="plain-warn">Tried to change the hidden checks ${m.guards === 1 ? 'once' : `${m.guards} times`}. The system undid it.</div>` : ''),
+      col('verify', 'Checker', 'the Verify box: the system, not an AI', status('verify') + p('The software from the Builder.') + p("The Builder's own checks and QA's hidden ones."),
+        runs.length ? p(`Ran the checks <b>${runs.length === 1 ? 'once' : `${runs.length} times`}</b>: ${runs.length - failedRuns} passed${failedRuns ? `, ${failedRuns} failed and went back to the Builder to fix` : ''}.`) : p('Nothing yet.'))];
+    // Every role in pipeline order
+    const order = DEF?.steps ?? [];
     cols = [you, ...order.flatMap(step => {
       if (step.type !== 'agent') return builtIn[step.type] ?? [];
         const report = step.verdict ? files.get(step.verdict.file)?.content ?? '' : '';
         const v = report.match(/VERDICT:\s*(\w+)/)?.[1];
         const n = (report.match(/^\s*(?:\d+\.|[-*])\s+/gm) ?? []).length;
         const sentBack = m.steps.filter(x => x.node === step.id).length - 1;
-        const got = step.reads.map(r => r === 'git diff' ? 'The finished software.' : r.includes('PRD') ? 'The plan, to compare against.' : '').filter(Boolean);
+        const got = step.reads.map(r => r === 'git diff' ? 'The finished software.' : '').filter(Boolean);
         const wrote = byRole(step.id);
         const gave = step.verdict
           ? (v ? p(`A report that <b>${v === 'approve' ? 'recommends accepting' : 'asks for changes to'}</b> the work${n ? `, with ${plural(n, 'note')}` : ''}.`) : '')
-            + (step.verdict.onChanges === 'dev' && sentBack > 0 ? p(`Sent the software back to the Developer <b>${sentBack === 1 ? 'once' : `${sentBack} times`}</b> to fix what it found.`) : '')
+            + (step.verdict.onChanges === 'dev' && sentBack > 0 ? p(`Sent the software back to the Builder <b>${sentBack === 1 ? 'once' : `${sentBack} times`}</b> to fix what it found.`) : '')
           : wrote.length ? p(`${plural(wrote.length, 'document')} for the team.`) : '';
         return [col(step.id, esc(step.name), esc(step.purpose), status(step.id) + ([...new Set(got)].map(p).join('') || p('The work so far.')), gave || p('Nothing yet.'))];
     })];
@@ -798,30 +553,30 @@ function renderStory(m) {
 
 // ---------- Handoffs: roles never talk to each other; they hand files over through the orchestrator ----------
 
-const PRODUCERS = ['you', 'planner', 'qa', 'dev', 'verify', 'reviewer', 'single'];
-const COLUMN_NAMES = { you: 'You', planner: 'Planner', qa: 'QA', dev: 'Dev', verify: 'Verify', reviewer: 'Reviewer', single: 'Single AI' };
+const PRODUCERS = ['you', 'qa', 'dev', 'verify', 'reviewer', 'single'];
+const COLUMN_NAMES = { you: 'You', qa: 'QA', dev: 'Builder', verify: 'Verify', reviewer: 'Reviewer', single: 'Single AI' };
 const COLUMN_NAME = new Proxy(COLUMN_NAMES, { get: (o, k) => o[k] ?? stageOf(k).name });
 const GATE_SHOWN = {
-  plan: 'You were shown <b>PRD.md</b>, <b>plan.json</b> (with the architecture) and <b>contracts/</b> from the Planner, and the reports of the roles before it.',
+  architecture: 'You were shown the Architect’s modules, the rules between them, its decisions and the contracts.',
   design: 'You were shown the system diagram and the reports of the roles before this gate.',
   code: 'You were shown the full diff, the test results from Verify and the reviewers’ reports.',
-  escalation: 'You were shown the failing module, the reasons and the test output from Verify.',
+  escalation: 'You were shown why the build cannot go on: the reasons and the test output from Verify, or the Builder’s request for another architecture.',
 };
 /** Where a gate decision sends the run, from the pipeline definition. */
 function gateNext(gate, decision) {
   if (decision === 'abort') return 'run cancelled';
-  if (gate === 'escalation') return decision === 'retry' ? 'Dev tries again' : 'back to the Planner';
+  if (gate === 'escalation') return 'the Builder tries again';
   const id = gateNode(gate);
   const steps = DEF?.steps ?? [];
   const i = steps.findIndex(s => s.id === id);
   const step = steps[i];
   if (decision === 'revise') {
-    const target = step?.reviseTo ?? (gateKind(gate) === 'plan' ? 'planner' : 'build');
-    return `back to ${target === 'build' ? 'Dev' : stageOf(target).name}`;
+    const target = step?.reviseTo ?? 'build';
+    return `back to ${target === 'build' ? 'the Builder' : stageOf(target).name}`;
   }
   const next = steps[i + 1];
   if (!next) return 'work is committed';
-  return next.type === 'qa' ? 'QA starts writing tests' : `${next.type === 'build' ? 'Dev' : stageOf(next.id).name} starts`;
+  return next.type === 'qa' ? 'QA and the Builder start' : `${stageOf(next.id).name} starts`;
 }
 const shortName = p => p.replace(/^\.devcrew\//, '');
 
@@ -862,12 +617,10 @@ function inputBlock(e) {
 
 function outputBlock(e) {
   const kept = e.files.filter(f => f.change !== 'deleted');
-  const version = e.role === 'planner' ? archVersions().find(v => v.seq === e.seq) : null;
   return `<div class="io out"><div class="io-label">Output</div><div>
     ${kept.length ? `<div>Wrote ${plural(kept.length, 'file')}:</div><div class="chips">${kept.map(f => fileChip(f.path, e.role, e.seq) + `<span class="hint">${f.change === 'added' ? 'new' : 'changed'} · ${f.lines} lines</span>`).join('')}</div>` : '<div class="hint">No files changed.</div>'}
     ${e.to.length ? `<div class="handto">Handed to: ${e.to.map(t => `<b>${esc(t)}</b>`).join(', ')}</div>` : ''}
-    ${version ? `<div class="proposal"><div class="proposal-title">Proposed architecture, version ${version.version}: ${plural(version.files.length, 'file')}, sent to you for review at Gate 1</div>
-      <div class="arch-host" data-arch-seq="${e.seq}"></div></div>` : ''}</div></div>`;
+</div></div>`;
 }
 
 /** Receives / produces / hands-to for a step defined in the pipeline file. */
@@ -876,17 +629,17 @@ function stepContract(node) {
   const i = steps.findIndex(x => x.id === node);
   const step = steps[i];
   if (!step) return null;
-  const nextName = x => !x ? 'the end of the run' : x.type === 'gate' ? `${x.title} (you)` : x.type === 'build' ? 'Dev' : stageOf(x.id).name;
+  const nextName = x => !x ? 'the end of the run' : x.type === 'gate' ? `${x.title} (you)` : x.type === 'build' ? 'the Builder' : stageOf(x.id).name;
   if (step.type === 'gate') {
-    const base = S.config?.contracts?.[step.review === 'plan' ? 'gate_spec' : 'gate_merge'];
-    const back = step.reviseTo === 'build' ? 'Dev' : stageOf(step.reviseTo).name;
+    const base = S.config?.contracts?.gate_merge;
+    const back = step.reviseTo === 'build' ? 'the Builder' : stageOf(step.reviseTo).name;
     return base && { ...base, handsTo: [`${nextName(steps[i + 1])} (approved)`, `${back} (changes requested)`] };
   }
   if (step.type !== 'agent') return null;
   return {
     input: step.reads.map(r => (r === 'git diff' ? 'Every code change so far' : r)),
     output: step.produces,
-    handsTo: [...(step.verdict?.onChanges === 'dev' ? [`Dev, if something must be fixed (at most ${step.verdict.maxRounds ?? 1} time${(step.verdict.maxRounds ?? 1) === 1 ? '' : 's'})`] : []), nextName(steps[i + 1])],
+    handsTo: [...(step.verdict?.onChanges === 'dev' ? [`The Builder, if something must be fixed (at most ${step.verdict.maxRounds ?? 1} time${(step.verdict.maxRounds ?? 1) === 1 ? '' : 's'})`] : []), nextName(steps[i + 1])],
     mayWrite: step.mayWrite.join(', '),
   };
 }
@@ -911,7 +664,7 @@ function renderHandoffs(m) {
     if (e.type === 'gate_resolved' && !['approve'].includes(e.decision) && e.feedback) col.you.extra.push(`Feedback at ${stageOf(gateNode(e.gate))?.name}`);
     if (e.type === 'agent_input' && col[e.role]) {
       const c = col[e.role];
-      for (const f of e.from) if (/^(You|Verify|System|Dev): /.test(f) && !/^Dev: all/.test(f)) c.notes.add(f);
+      for (const f of e.from) if (/^(You|Verify|System|Builder): /.test(f) && !/^Builder: all/.test(f)) c.notes.add(f);
       for (const f of resolveReads(e.reads, producersBefore(e.seq))) c.received.set(f.path, f);
     }
     if (e.type === 'agent_output' && col[e.role]) {
@@ -919,7 +672,7 @@ function renderHandoffs(m) {
         if (f.change === 'deleted') col[e.role].produced.delete(f.path);
         else col[e.role].produced.set(f.path, { role: e.role, seq: e.seq });
       }
-      // Reviewer and Verify read the code Dev produced
+      // Reviewer and Verify read the code the Builder produced
       if (e.role === 'dev' || e.role === 'single') for (const f of e.files) if (f.change !== 'deleted') {
         if (col.verify) col.verify.received.set(f.path, { role: e.role, seq: e.seq });
         for (const r of readsCode) if (col[r]) col[r].received.set(f.path, { role: e.role, seq: e.seq });
@@ -964,7 +717,7 @@ function openFile(seq, path) {
 // ---------- Activity log: steps owned by a box, written for people ----------
 
 const KIND = { edit: 'edit', read: 'read', execute: 'run', search: 'search', fetch: 'web', delete: 'delete', move: 'move', think: 'think' };
-const ROLE_NAMES = { planner: 'Planner', qa: 'QA', dev: 'Dev', reviewer: 'Reviewer', single: 'AI' };
+const ROLE_NAMES = { qa: 'QA', dev: 'Builder', reviewer: 'Reviewer', single: 'AI' };
 const ROLE_NAME = new Proxy(ROLE_NAMES, { get: (o, k) => o[k] ?? stageOf(k).name });
 
 function reasonText(r) {
@@ -979,10 +732,9 @@ function reasonText(r) {
 function stepTitle(s) {
   switch (s.node) {
     case 'start': return 'Run started';
-    case 'planner': return s.visit > 1 ? 'Planner updates the plan from feedback' : 'Planner reads the task and plans';
-    case 'qa': return s.visit > 1 ? 'QA rewrites tests for the new plan' : 'QA writes tests from the spec, before any code';
-    case 'dev': return `Dev writes module ${s.module} · attempt ${s.attempt}`;
-    case 'verify': return s.module ? `System checks module ${s.module}` : 'System runs the tests';
+    case 'qa': return s.module ? 'QA checks a hidden test the Builder disputes' : 'QA writes hidden tests while the Builder builds';
+    case 'dev': return `Builder works · attempt ${s.attempt ?? 1}`;
+    case 'verify': return "System runs the Builder's tests and the hidden ones";
     case 'reviewer': return 'Reviewer checks the code';
     case 'single': return s.attempt > 1 ? `Single AI fixes its work · round ${s.attempt - 1}` : 'Single AI does the whole task';
     case 'escalate': return 'Asked a human to decide';
@@ -1037,7 +789,7 @@ function stepLines(s) {
         line('blocked', `${ROLE_NAME[e.role] ?? e.role} tried to change ${e.files.map(f => `<code>${esc(f)}</code>`).join(', ')}, which it is not allowed to touch. ${e.action === 'reverted' ? 'The system put the file back.' : 'The system refused the change.'}`, 'warnline');
         break;
       case 'verify_result':
-        if (e.commands?.length) out.push(`<div class="io in"><div class="io-label">Input</div><div>Ran ${e.commands.map(c => `<code>${esc(c)}</code>`).join(', ')} against the code from Dev, using the locked tests from QA.</div></div>`);
+        if (e.commands?.length) out.push(`<div class="io in"><div class="io-label">Input</div><div>Ran ${e.commands.map(c => `<code>${esc(c)}</code>`).join(', ')} against the Builder's code, with its own tests and QA's hidden ones.</div></div>`);
         line(e.passed ? 'pass' : 'fail', `${e.passed ? `All ${e.tests.total} tests passed` : `${e.reasons.map(reasonText).map(esc).join(' · ')}<br><span class="muted">The result goes back to be fixed.</span>`}
           <details><summary>Full test output</summary><pre>${esc(e.output.slice(-4000))}</pre></details>`, e.passed ? 'okline' : 'badline');
         break;
@@ -1067,23 +819,11 @@ function stepsHtml(steps, m, all = false) {
   }).join('');
 }
 
-/** Fill in the Planner's proposed designs inside its steps. */
-function fillArchHosts(root) {
-  const versions = archVersions();
-  root.querySelectorAll('.arch-host').forEach(host => {
-    const v = versions.find(x => x.seq === Number(host.dataset.archSeq));
-    if (!v) return;
-    host.innerHTML = diffBanner(v, versions[v.version - 2]) + renderArch(v.files, null, v.plan, archDiff(versions[v.version - 2], v));
-    requestAnimationFrame(() => drawArch(host, v.files));
-  });
-}
-
 function renderSteps(m, first) {
   const box = $('#steps');
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
   const prevTop = box.scrollTop;
   box.innerHTML = stepsHtml(m.steps, m) || '<div class="empty small">Nothing logged yet</div>';
-  fillArchHosts(box);
   if (first || atBottom) box.scrollTop = box.scrollHeight; else box.scrollTop = prevTop;
   renderRolePopup(m);
 }
@@ -1099,16 +839,14 @@ function renderRolePopup(m) {
   $('#role-title').textContent = `${stageOf(S.popup)?.name ?? S.popup}`;
   $('#role-meta').textContent = `${plural(steps.length, 'step')} in this run${stage.state === 'active' ? ' · working now' : stage.state === 'waiting' ? ' · waiting for you' : ''}`;
   body.innerHTML = contractBox(S.popup) + (stepsHtml(steps, m, true) || '<p class="hint">This box has not done anything yet.</p>');
-  fillArchHosts(body);
   body.scrollTop = prevTop;
 }
 
 function renderModules(m) {
-  const planned = m.plan?.modules?.map(x => x.id) ?? [];
-  const ids = [...new Set([...planned, ...m.modules.keys()])];
+  const ids = [...m.modules.keys()];
   const max = S.config?.maxFixAttempts ?? 5;
   if (!ids.length) {
-    $('#modules').innerHTML = `<span class="hint">${m.mode === 'single' ? 'Single AI mode does not split work into modules.' : 'Shows up once the Planner has split the work.'}</span>`;
+    $('#modules').innerHTML = `<span class="hint">${m.mode === 'single' ? 'Single AI mode does not split work into modules.' : 'Shows up once the Builder starts.'}</span>`;
     return;
   }
   $('#modules').innerHTML = ids.map(id => {
@@ -1116,7 +854,7 @@ function renderModules(m) {
     const last = tries.at(-1);
     const state = last === 'pass' ? `<span class="yes">Passed${tries.length > 1 ? ` (attempt ${tries.length})` : ''}</span>` : last === 'fail' ? '<span class="no">Failing</span>' : tries.length ? '<span class="hint">Writing…</span>' : '<span class="hint">Queued</span>';
     const cells = Array.from({ length: Math.max(max, tries.length) }, (_, i) => `<span class="try ${tries[i] ?? ''}"></span>`).join('');
-    return `<div class="mod"><span class="name">${esc(id)}</span>${state}<div class="tries" title="Each box is one Dev attempt (max ${max})">${cells}</div></div>`;
+    return `<div class="mod"><span class="name">${esc(id)}</span>${state}<div class="tries" title="Each box is one Builder attempt (max ${max})">${cells}</div></div>`;
   }).join('') + '<div class="legend"><span><i class="sw pass"></i>Passed</span><span><i class="sw fail"></i>Failed, sent back</span><span><i class="sw"></i>Attempts left</span></div>';
 }
 
@@ -1145,21 +883,7 @@ function renderGate(m) {
   const kind = payload.kind ?? gateKind(gate);
   S.gate = m.gate;
   let body = '', actions = '', title = '';
-  if (kind === 'plan') {
-    title = `Gate · ${payload.title && payload.title !== 'Spec & Architecture Approval' ? payload.title : 'Review the spec and plan'}`;
-    const plan = payload.plan;
-    body = `${payload.specIssue ? `<div class="banner warn">Dev reported a problem with the spec: ${esc(payload.specIssue)}</div>` : ''}
-      <p class="gate-ask">The Planner has written the spec and designed every file to build. Nothing has been built yet. If you approve, QA writes tests and Dev builds exactly these files; anything outside this design will be flagged.</p>
-      <div class="subtabs" id="spec-tabs"><button type="button" class="on" data-pane="arch">Architecture (${plural(plan?.architecture?.length ?? 0, 'file')})</button>${coverageButton(payload)}<button type="button" data-pane="prd">Spec (PRD)</button><button type="button" data-pane="parts">Parts and build order</button>${reportButtons(payload.reports)}</div>
-      <div data-pane="arch">${(() => { const vs = archVersions(); const v = vs.at(-1); const prev = v && vs[v.version - 2]; return (v ? diffBanner(v, prev) : '') + renderArch(plan?.architecture, null, plan, v ? archDiff(prev, v) : null); })()}</div>
-      ${coveragePane(payload)}
-      <div data-pane="prd" hidden><div class="doc">${payload.prd ? md(payload.prd) : '<p class="hint">No PRD written</p>'}</div></div>
-      <div data-pane="parts" hidden><h4>Work split into ${plural(plan?.modules?.length ?? 0, 'part')} (Dev builds them in this order)</h4>
-        <ul class="module-list">${(plan?.modules ?? []).map((x, i) => `<li><span class="id">${i + 1}. ${esc(x.id)}</span> — ${esc(x.title)}<div class="desc">${esc(x.description)}</div></li>`).join('')}</ul>
-        <dl class="kv" style="margin-top:12px"><dt>Test command</dt><dd><code>${esc(plan?.testCommand)}</code></dd></dl></div>
-      ${reportPanes(payload.reports)}`;
-    actions = gateButtons([['approve', 'Approve plan and architecture', 'ok'], ['revise', 'Ask for changes', ''], ['abort', 'Cancel run', 'danger']]);
-  } else if (kind === 'architecture') {
+  if (kind === 'architecture') {
     title = `Gate · ${payload.title ?? 'Approve the architecture'}`;
     const a = payload.architecture;
     const contracts = payload.contracts ?? [];
@@ -1189,10 +913,10 @@ function renderGate(m) {
     actions = gateButtons([['approve', isLast ? 'Approve and commit the design' : 'Approve and continue', 'ok'], ['revise', 'Ask for changes', ''], ['abort', 'Cancel run', 'danger']]);
   } else if (kind === 'escalation') {
     title = 'Your decision is needed';
-    body = `<p class="gate-ask">Dev tried module <b>${esc(payload.module)}</b> ${plural(payload.attempts, 'time')} and it still fails, because:</p>
+    body = `<p class="gate-ask">${esc(payload.title ?? `The Builder tried ${plural(payload.attempts, 'time')} and it still fails`)}, because:</p>
       <ul>${(payload.reasons ?? []).map(r => `<li>${esc(reasonText(r))}</li>`).join('')}</ul>
       <details><summary>Full test output</summary><pre class="doc">${esc(payload.output)}</pre></details>`;
-    actions = gateButtons([['retry', 'Let Dev try again (add a hint)', 'primary'], ['replan', 'Send back to the Planner', ''], ['abort', 'Cancel run', 'danger']]);
+    actions = gateButtons([['retry', 'Let the Builder try again (add a hint)', 'primary'], ['abort', 'Cancel run', 'danger']]);
   } else if (kind === 'code') {
     title = `Gate · ${payload.title && payload.title !== 'Merge Approval' ? payload.title : 'Approve the merge'}`;
     const files = payload.files ?? [];
@@ -1201,7 +925,7 @@ function renderGate(m) {
     const reviews = payload.reviews ?? (payload.review ? [{ step: 'reviewer', name: 'Reviewer', text: payload.review }] : []);
     const verdictOf = t => (t ?? '').match(/VERDICT:\s*(\w+)/)?.[1];
     const usage = Object.values(payload.usage ?? {});
-    body = `<p class="gate-ask">Every module passes its tests${reviews.length ? ` and ${reviews.map(r => esc(r.name)).join(' and ')} ${reviews.length === 1 ? 'has' : 'have'} checked the code` : ''}. If you approve, the work is committed to a branch. Nothing is deployed.</p>
+    body = `<p class="gate-ask">The code passes the Builder's tests and QA's hidden ones${reviews.length ? ` and ${reviews.map(r => esc(r.name)).join(' and ')} ${reviews.length === 1 ? 'has' : 'have'} checked the code` : ''}. If you approve, the work is committed to a branch. Nothing is deployed.</p>
       <div class="gate-grid"><div>
         <div class="subtabs" id="merge-tabs"><button type="button" class="on" data-pane="files">Changed files (${files.length})</button><button type="button" data-pane="diff">Code changes</button>${reviews.map((r, i) => `<button type="button" data-pane="review-${i}">${esc(r.name)} notes</button>`).join('')}${reportButtons(payload.reports)}</div>
         <div data-pane="files"><table class="files">${files.map(f => `<tr><td class="path">${esc(f.path)}</td><td class="add">+${f.added}</td><td class="del">−${f.removed}</td></tr>`).join('')}</table></div>
@@ -1223,9 +947,7 @@ function renderGate(m) {
   slot.querySelectorAll('.subtabs button').forEach(b => b.addEventListener('click', () => {
     b.parentElement.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
     slot.querySelectorAll('[data-pane]:not(button)').forEach(p => { p.hidden = p.dataset.pane !== b.dataset.pane; });
-    if (b.dataset.pane === 'arch') drawArch(slot, payload.plan?.architecture);
   }));
-  if (kind === 'plan') requestAnimationFrame(() => drawArch(slot, payload.plan?.architecture));
   wireGate(slot);
 }
 
@@ -1421,7 +1143,6 @@ async function select(runId) {
   S.lastStatus = null;
   S.selected = runId;
   S.popup = null;
-  S.archVersion = null;
   S.gate = null;
   S.open = new Map();
   history.replaceState(null, '', runId ? `#run=${runId}` : '#');
@@ -1465,15 +1186,14 @@ async function openNewRun(pipelineId) {
 
 /** A pipeline in plain words, one line per step (the same wording the CLI prints). */
 function describeSteps(def) {
-  const nameOf = s => !s ? 'the end of the run' : s.type === 'gate' ? `you (${s.title})` : s.type === 'agent' ? s.name : s.type === 'build' ? 'Dev' : s.type === 'qa' ? 'QA' : 'the Planner';
+  const nameOf = s => !s ? 'the end of the run' : s.type === 'gate' ? `you (${s.title})` : s.type === 'agent' ? s.name : s.type === 'build' ? 'the Builder' : 'QA';
   return def.steps.map((s, i) => {
     let who, what;
     switch (s.type) {
-      case 'planner': who = 'Planner'; what = 'Reads your request, writes the spec and designs every file.'; break;
-      case 'qa': who = 'QA'; what = 'Writes tests from the spec before any code exists. The tests are locked afterwards.'; break;
-      case 'build': who = 'Dev + Verify'; what = `Dev builds one part at a time; the system runs the tests after each try. Up to ${s.maxAttempts ?? S.config?.maxFixAttempts ?? 5} tries per part, then you decide.`; break;
-      case 'gate': who = 'You'; what = `Review the ${{ plan: 'spec, architecture and the reports so far', code: 'code, test results and reviews', design: 'system diagram and the reports so far', architecture: "project's lasting architecture" }[s.review]} (“${esc(s.title)}”). Approve to continue${i === def.steps.length - 1 ? ' and commit' : ''}, or ask for changes to send it back to ${esc(nameOf(def.steps.find(x => x.id === s.reviseTo)))}.`; break;
-      default: who = esc(s.name) + (s.agent ? ` <span class="hint">(${esc(s.agent)})</span>` : ''); what = `${esc(s.purpose)} May only write <code>${s.mayWrite.map(esc).join(', ')}</code>.${s.verdict?.onChanges === 'dev' ? ` Can send the code back to Dev, at most ${plural(s.verdict.maxRounds ?? 1, 'time')}.` : ''}${/^guide:/.test(s.instructions) ? ` Follows the role guide <code>pipelines/roles/${esc(s.instructions.slice(6))}.md</code>.` : ''}${s.needs?.length ? ` Needs an agent that can use ${esc(s.needs.join(' and '))}.` : ''}`;
+      case 'qa': who = 'QA'; what = 'Writes hidden acceptance tests from your request while the Builder works. The Builder never sees them, only which ones fail.'; break;
+      case 'build': who = 'Builder + Verify'; what = `The Builder plans, codes and writes its own tests; the system runs those and QA's hidden ones after each try. Up to ${s.maxAttempts ?? S.config?.maxFixAttempts ?? 5} tries, then you decide.`; break;
+      case 'gate': who = 'You'; what = `Review the ${{ code: 'code, test results and reviews', design: 'system diagram and the reports so far', architecture: "project's lasting architecture" }[s.review]} (“${esc(s.title)}”). Approve to continue${i === def.steps.length - 1 ? ' and commit' : ''}, or ask for changes to send it back to ${esc(nameOf(def.steps.find(x => x.id === s.reviseTo)))}.`; break;
+      default: who = esc(s.name) + (s.agent ? ` <span class="hint">(${esc(s.agent)})</span>` : ''); what = `${esc(s.purpose)} May only write <code>${s.mayWrite.map(esc).join(', ')}</code>.${s.verdict?.onChanges === 'dev' ? ` Can send the code back to the Builder, at most ${plural(s.verdict.maxRounds ?? 1, 'time')}.` : ''}${/^guide:/.test(s.instructions) ? ` Follows the role guide <code>pipelines/roles/${esc(s.instructions.slice(6))}.md</code>.` : ''}${s.needs?.length ? ` Needs an agent that can use ${esc(s.needs.join(' and '))}.` : ''}`;
     }
     if (s.type !== 'agent' && /^guide:/.test(s.guide ?? '')) what += ` Also follows the role guide <code>pipelines/roles/${esc(s.guide.slice(6))}.md</code>.`;
     return `<li data-node="${s.type === 'build' ? 'dev' : s.id}"><b>${who}</b> ${what}</li>`;
@@ -1534,7 +1254,7 @@ const MIN_N = 10;
 async function renderBench() {
   const { results: all, arms: armList, tasks } = await (await fetch('/api/bench')).json();
   const ARM = Object.fromEntries(armList.map(a => [a.id, a]));
-  const order = ['single-vanilla', 'single-process', 'multi-same', 'multi-cross'].filter(id => ARM[id]);
+  const order = ['single-vanilla', 'multi-fast', 'multi-fast-arch', 'ext-claude-cli', 'ext-agent-teams', 'ext-bmad'].filter(id => ARM[id]);
   const TASK = Object.fromEntries(tasks.map(t => [t.id, t]));
   const el = $('#bench-tab');
   const chip = id => `<span class="arm-chip" style="--arm:${ARM[id]?.color}">${esc(ARM[id]?.code ?? id)}</span>`;
@@ -1542,15 +1262,15 @@ async function renderBench() {
   const intro = `<h1>AI team vs one AI</h1>
     <p class="lede">Does splitting the work across several AIs (each one sees only its own part) beat <b>one AI that keeps everything in a single memory</b>? And how much more does it cost?</p>`;
 
-  const armCards = `<section class="section"><h2>The 4 contestants</h2>
-    <p class="hint">Every group gets the exact same task, the same AI model (except C), the same time limit, and is graded by the same hidden tests.</p>
+  const armCards = `<section class="section"><h2>The ${order.length} contestants</h2>
+    <p class="hint">Every group gets the exact same task, the same AI model, the same time limit, and is graded by the same hidden tests. The outside workflows (X, T, M) run without DevCrew; it only grades them.</p>
     <div class="arm-cards">${order.map(id => { const a = ARM[id]; return `<div class="arm-card" style="--arm:${a.color}">
       <div class="arm-top"><span class="arm-code">${esc(a.code)}</span><span class="tag ${a.role}">${ROLE_TAG[a.role] ?? ''}</span></div>
       <h4>${esc(a.name)}</h4>
       <div class="agents">${a.agents > 1 ? `${a.agents} AIs, separate memories` : '1 AI, one memory'}</div>
       <p class="desc">${esc(a.summary)}</p>
       <ol class="mini-flow">${a.steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol></div>`; }).join('')}</div>
-    <div class="banner info"><b>Why is there a group A+?</b> If we only compared A and B and B won, people could say B won because it <i>follows better steps</i>, not because it <i>splits the work into a team</i>. A+ is one AI following exactly the same steps as the team. So <b>B vs A+</b> is the fair answer to “does a team of AIs help?”</div></section>`;
+    </section>`;
 
   const how = `<section class="section"><h2>How we judge</h2><div class="how">
     <div><span class="num">1</span><b>Same task</b><p>Every group starts from the same starter project in its own folder. Runs happen in random order so no group gets a luckier time slot.</p></div>
@@ -1560,7 +1280,7 @@ async function renderBench() {
 
   if (!all.length) {
     el.innerHTML = `${intro}${armCards}${how}<section class="card"><div class="empty"><h2>No results yet</h2><p>Start a pilot with:</p>
-      <div class="code-block">npm run bench -- --tasks S-01-cart --arms single-vanilla,single-process,multi-same --reps 2</div>
+      <div class="code-block">npm run bench -- --tasks S-01-cart --arms single-vanilla,multi-fast,ext-agent-teams --reps 2</div>
       <p class="hint">Add <code>--profile fake</code> to test the setup without using any quota.</p></div></section>`;
     return;
   }
@@ -1584,9 +1304,11 @@ async function renderBench() {
 
   // The three questions, answered in sentences
   const questions = [
-    ['multi-same', 'single-process', 'Does splitting into a team help?', 'Main question', 'Both groups follow the same steps. The only difference is one AI or several.'],
-    ['single-process', 'single-vanilla', 'Does following a process help?', '', 'Both are one AI. The only difference is the forced steps and the system re-running tests.'],
-    ['multi-cross', 'multi-same', 'Do checkers from another vendor help?', '', 'Same team. The only difference is that QA and Reviewer use another vendor’s model.'],
+    ['multi-fast', 'single-vanilla', 'Does a team beat one AI?', 'Main question', 'Same model and task. The team adds a blind QA, a judge that runs the tests, and a reviewer.'],
+    ['multi-fast-arch', 'multi-fast', 'Does a fixed architecture help?', '', 'Same team. fast-arch adds an Architect whose module rules Verify enforces.'],
+    ['ext-agent-teams', 'multi-fast', 'DevCrew against Claude Code agent teams', '', 'Both are teams of the same model; agent teams are Anthropic’s own, with no DevCrew in the loop.'],
+    ['ext-bmad', 'multi-fast', 'DevCrew against BMAD', '', 'Both are teams of the same model; BMAD runs its own unattended build.'],
+    ['ext-claude-cli', 'single-vanilla', 'Is the one-AI arm measured fairly?', '', 'The same one-AI task, run by Claude Code itself instead of through DevCrew.'],
   ].filter(([x, y]) => ST[x] && ST[y]);
   const answer = ([x, y, q, tag, why]) => {
     const a = ST[x], b = ST[y];
@@ -1656,7 +1378,7 @@ async function renderBench() {
       <dt>Tokens</dt><dd>The unit for how much text an AI reads and writes. More tokens means more of your quota used.</dd>
       <dt>Cost</dt><dd>What the run would cost at the vendor’s API prices, so groups can be compared even though we pay a monthly plan.</dd>
       <dt>Fix rounds</dt><dd>How many times the system ran the tests, saw failures, and sent the work back to be fixed.</dd>
-      <dt>Files blocked</dt><dd>Files an AI tried to change without permission (for example, Dev editing a test). The system put them back.</dd>
+      <dt>Files blocked</dt><dd>Files an AI tried to change without permission (for example, the Builder editing a hidden test). The system put them back.</dd>
       <dt>Memory (context)</dt><dd>Everything an AI has to keep in mind while it works. When it gets too large, AIs tend to forget or get confused, which is why we try splitting the work into a team.</dd>
     </dl></details>`;
   $('#suite-select')?.addEventListener('change', e => { S.benchSuite = e.target.value; renderBench(); });
@@ -1753,8 +1475,6 @@ async function boot() {
   });
   view.addEventListener('click', e => {
     if (e.target.closest('.file-chip')) return;
-    const ver = e.target.closest('[data-arch-version]');
-    if (ver) { S.archVersion = Number(ver.dataset.archVersion); S.archKey = null; return update(); }
     const node = e.target.closest('.node.clickable[data-node]');
     if (node) return openRole(node.dataset.node);
     const copy = e.target.closest('[data-copy]');
@@ -1793,10 +1513,6 @@ async function boot() {
   setInterval(() => document.querySelectorAll('[data-elapsed]').forEach(el => {
     if (!el.dataset.ended && el.dataset.elapsed !== 'undefined') el.textContent = fmtDur(Date.now() - Number(el.dataset.elapsed));
   }), 1000);
-  new ResizeObserver(() => {
-    drawArch($('#arch'), plannedArchitecture());
-    if (S.gate && gateKind(S.gate.gate) === 'plan') drawArch($('#gate-slot'), S.gate.payload.plan?.architecture);
-  }).observe(document.body);
   connect();
   refreshRunList();
   loadPipelines();

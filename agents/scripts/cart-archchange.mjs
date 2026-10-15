@@ -1,7 +1,7 @@
 // Scripted fast-arch run where the design does not fit: the Builder's first answer asks the
 // Architect to let util use the cart (ARCH_CHANGE). The Architect changes the design, it is
 // approved, and the Builder carries on inside the new version.
-import fast from './cart-fast.mjs';
+import fast from './cart.mjs';
 
 const [design] = fast.turns.architect;
 const changed = JSON.parse(design.files['.devcrew/architecture.json']);

@@ -59,7 +59,7 @@ export interface GateNotice {
 }
 
 export const gateDecisions = (payload: Record<string, unknown>): string[] =>
-  payload.kind === 'escalation' ? ['retry', 'replan', 'abort'] : ['approve', 'revise', 'abort'];
+  payload.kind === 'escalation' ? ['retry', 'abort'] : ['approve', 'revise', 'abort'];
 
 export function gateNotice(cfg: NotifyConfig, runId: string, gate: GateId, payload: Record<string, unknown>, requirement: string): GateNotice {
   const base = (cfg.dashboardUrl ?? `http://127.0.0.1:${process.env.PORT ?? 4317}`).replace(/\/$/, '');
