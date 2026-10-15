@@ -1,6 +1,24 @@
 # สถานะโปรเจกต์
 
-อัปเดตล่าสุด: 2026-10-14
+อัปเดตล่าสุด: 2026-10-15
+
+## Latest changes (2026-10-15, five changes in a row: fast vs fast-arch)
+**Experiment `roadmap-self`:** XL-06 (build the cafe pricing engine) then XL-07 cash, XL-08 tax, XL-09 promotions and XL-10 stacking, each change made by the same arm on the code it left (`--handoff-self`); 2 reps per arm, Haiku (Architect on Sonnet). Hidden tests of a round include every earlier round's, so a broken old behaviour shows as a regression. Report: `bench/results/roadmap-self/REPORT.md`, `npx tsx bench/runner/loop-report.ts roadmap-self`.
+
+| Arm | Hidden (all 5 rounds, 2 reps) | Regressions | Tokens/round | $/round | Min/round | Code after round 5 (rep 1) |
+|---|---|---|---|---|---|---|
+| fast | 184/184, 10/10 resolved | 0 | 3.4M | 0.22 | 5.6 | 746 lines, 13 files, largest 144 |
+| fast-arch | 180/184, 6/10 resolved | 0 | 3.6M | 0.31 | 6.3 | 998 lines, 29 files, largest 160 |
+
+- Both arms kept every earlier behaviour through five changes. fast-arch's misses are one test in rep 2 (`formatMoney` printed `JPY 1,235` for `¥1,235` from XL-07 on; QA's hidden tests had no JPY case, so nothing in the run could catch it) plus one XL-08 run failed by the hidden-test counting bug fixed in `1fb63c4`.
+- The Architect paid off in design, not yet in numbers: its modules (errors, money, config, order, promotions with one evaluator file per type, tax policy, engine pipeline) and ADRs anticipated currencies, happy hour and stacking, and later changes landed inside them without an ARCH_CHANGE. Cost: round 1 is $0.67 against $0.25; later rounds are about the same as fast (3.3-4.4M tokens). On a 1,000-line project fast's single-module code also stayed clean (0% duplication), so this task is too small to show a gap.
+- **Found and fixed:**
+  - Hidden tests of an earlier run were seen by the Builder and miscounted by Verify (expected 71, ran 16), failing correct runs: they are now taken out at the start and all of them run (`1fb63c4`).
+  - The reviewer saw an earlier run's `acceptance/` as deleted (it is hidden while the Builder works) and asked the Builder to restore it, which the guard reverted: a wasted fix round in 9 of 16 follow-up runs. Steps and gates after a blind build now see `acceptance/` as it will be committed; the reviewer is told not to ask for changes there (`5145d2c`).
+  - fast-arch froze `contracts/`, so after five changes they described none of cash rounding or stacking and the Builder hit the guard 1-5 times in 5 of 8 follow-up runs. The architecture files stay locked; the Builder now keeps `contracts/` in step with the code (`5145d2c`).
+  - QA wrote one assertion for a clause with four examples: QA now asserts every exact example the requirement gives (`0d29a5b`, not in `roadmap-self-2`).
+- Running: `roadmap-self-2` (same design, with `5145d2c`) to measure the two fixes.
+- Tests: 65.
 
 ## Latest changes (2026-10-14 night, fast pipelines and an enforced architecture)
 - **Why:** loop rounds 0-2 showed the team paying a fresh session, a full read and a new plan per role (6.4 min per task against 2.1 for one agent, same result). Published work agrees: one writer plus independent checks (Cognition, Aider architect/editor, Anthropic), fewer agents cost less (AgentCoder 57k tokens vs MetaGPT 138k, ChatDev 184k).
