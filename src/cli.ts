@@ -6,7 +6,7 @@ import { RunManager } from './orchestrator/RunManager';
 import { getBus } from './orchestrator/runtime';
 
 const USAGE = `Usage:
-  npm run run -- start --requirement <file> [--source <dir>] [--profile <name>] [--pipeline <id>] [--auto]
+  npm run run -- start --requirement <file> [--source <dir>] [--profile <name>] [--pipeline single|<id>] [--addons a,b] [--auto]
   npm run run -- gate <runId> <approve|revise|retry|replan|abort> [--feedback <text>]
   npm run run -- resume <runId>     continue a run whose process stopped mid-way
   npm run run -- list
@@ -20,6 +20,7 @@ const { positionals, values } = parseArgs({
     source: { type: 'string' },
     profile: { type: 'string' },
     pipeline: { type: 'string' },
+    addons: { type: 'string' },
     auto: { type: 'boolean', default: false },
     feedback: { type: 'string' },
   },
@@ -57,6 +58,7 @@ async function main(): Promise<void> {
       source: values.source,
       profile: values.profile,
       pipeline: values.pipeline,
+      addons: values.addons ? values.addons.split(',') : undefined,
       autoApprove: values.auto,
     });
     console.log(`Run ${runId}`);

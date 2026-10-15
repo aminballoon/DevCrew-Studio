@@ -99,6 +99,8 @@ export interface PipelineDef {
   steps: Step[];
   /** Written on approval: the version of each role guide you approved, by name. */
   guideHashes?: Record<string, string>;
+  /** Add-on steps attached when the run started (pipelines/addons/). */
+  addons?: string[];
 }
 
 /** Where a role that may write it draws the system architecture diagram (design pipelines). */
@@ -187,12 +189,21 @@ export function validatePipeline(raw: unknown): string[] {
   } else if (def.kind === 'fast') {
     // The blind QA and the Builder start together, so they open the pipeline, in that order
     if (count('planner')) { errors.push('A fast pipeline has no "planner" step: the Builder plans its own work.'); }
-    // Optionally first an Architect and the gate where you approve its design; it runs only when the project has none yet
+    // First any research roles (reports under .devcrew/), then optionally the Architect and the gate
+    // where you approve its design; the Architect runs only when the project has none yet
     const iQaFast = index('qa');
     const before = steps.slice(0, Math.max(0, iQaFast));
-    const architectFirst = before.length === 2 && before[0].type === 'agent' && before[0].instructions === 'builtin:architect'
-      && before[1].type === 'gate' && before[1].review === 'architecture';
-    if (before.length && !architectFirst) { errors.push('Before "qa", a fast pipeline may only have the architect step ("builtin:architect") and then a gate with "review": "architecture".'); }
+    const iArch = before.findIndex(s => s.type === 'agent' && s.instructions === 'builtin:architect');
+    const research = iArch < 0 ? before : before.slice(0, iArch);
+    const arch = iArch < 0 ? [] : before.slice(iArch);
+    if (arch.length && !(arch.length === 2 && arch[1].type === 'gate' && arch[1].review === 'architecture')) {
+      errors.push('In a fast pipeline the architect step ("builtin:architect") comes right before "qa", with only a gate with "review": "architecture" between them.');
+    }
+    for (const r of research) {
+      if (r.type !== 'agent' || !Array.isArray(r.mayWrite) || r.mayWrite.some(p => typeof p !== 'string' || !p.startsWith('.devcrew/'))) {
+        errors.push(`Step "${r.id}": before "qa" a fast pipeline only has research roles, agent steps that write under .devcrew/ (reports, not code).`);
+      }
+    }
     const [qa, build] = steps.slice(Math.max(0, iQaFast));
     if (qa?.type !== 'qa' || build?.type !== 'build') { errors.push('A fast pipeline has the "qa" step and right after it the "build" step; they run at the same time.'); }
     else if (qa.blind !== true) { errors.push('The "qa" step of a fast pipeline must be blind ("blind": true): the Builder never sees its tests.'); }
@@ -357,6 +368,46 @@ export function listPipelines(): PipelineListing[] {
   scan(PIPELINES_DIR, false);
   scan(DRAFTS_DIR, true);
   return out;
+}
+
+// --- Add-ons: steps you attach to a fast pipeline when you start a run ---
+
+export const ADDONS_DIR = join(PIPELINES_DIR, 'addons');
+
+/** Research roles go first, reviewers right after the build, writers just before the final gate. */
+export interface Addon {
+  id: string;
+  name: string;
+  description: string;
+  start?: Step[];
+  afterBuild?: Step[];
+  end?: Step[];
+  guideHashes?: Record<string, string>;
+}
+
+export function listAddons(): Addon[] {
+  if (!existsSync(ADDONS_DIR)) { return []; }
+  return readdirSync(ADDONS_DIR).filter(f => f.endsWith('.json')).map(f => ({ ...JSON.parse(readFileSync(join(ADDONS_DIR, f), 'utf8')), id: f.replace(/\.json$/, '') }));
+}
+
+/** A fast pipeline with add-on steps in place, checked like any pipeline file. */
+export function composePipeline(base: PipelineDef, ids: string[]): PipelineDef {
+  if (!ids.length) { return base; }
+  if (base.kind !== 'fast') { throw new Error(`Add-ons attach to fast pipelines; "${base.id}" is not one.`); }
+  const all = listAddons();
+  const addons = ids.map(id => all.find(a => a.id === id) ?? (() => { throw new Error(`No add-on "${id}" in pipelines/addons/`); })());
+  const iBuild = base.steps.findIndex(s => s.type === 'build');
+  const pick = (k: 'start' | 'afterBuild' | 'end') => addons.flatMap(a => a[k] ?? []);
+  const def: PipelineDef = {
+    ...base,
+    name: `${base.name} + ${addons.map(a => a.name).join(' + ')}`,
+    steps: [...pick('start'), ...base.steps.slice(0, iBuild + 1), ...pick('afterBuild'), ...base.steps.slice(iBuild + 1, -1), ...pick('end'), base.steps[base.steps.length - 1]],
+    guideHashes: Object.assign({}, base.guideHashes, ...addons.map(a => a.guideHashes ?? {})),
+    addons: ids,
+  };
+  const errors = [...validatePipeline(def), ...changedGuides(def)];
+  if (errors.length) { throw new Error(`"${def.name}" is invalid:\n- ${errors.join('\n- ')}`); }
+  return def;
 }
 
 /** Record your decision on a draft. Approving validates it and moves it into pipelines/. */

@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { STUDIO_ROOT } from '../src/core/config';
-import { guidesOf, loadPipeline, PIPELINES_DIR, validatePipeline, withGuides, type PipelineDef } from '../src/pipeline/schema';
+import { composePipeline, guidesOf, loadPipeline, validatePipeline, withGuides, type PipelineDef } from '../src/pipeline/schema';
 
-const read = (id: string) => JSON.parse(readFileSync(join(STUDIO_ROOT, 'pipelines', `${id}.json`), 'utf8')) as PipelineDef;
+// Pipelines with a Planner are kept as test fixtures: the product ships single, fast and fast-arch
+const read = (id: string) => JSON.parse(readFileSync(join(STUDIO_ROOT, existsSync(join(STUDIO_ROOT, 'pipelines', `${id}.json`)) ? 'pipelines' : 'test/fixtures/pipelines', `${id}.json`), 'utf8')) as PipelineDef;
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x));
 
 test('every shipped pipeline is valid', () => {
@@ -167,7 +168,7 @@ test('a run is refused when a role needs something its agent cannot do', async (
 });
 
 test('built-in steps can add a role guide; a missing guide is a problem', () => {
-  const base = JSON.parse(readFileSync(join(PIPELINES_DIR, 'minimal.json'), 'utf8'));
+  const base = JSON.parse(JSON.stringify(read('minimal')));
   const withGuide = { ...base, id: 'guided', steps: base.steps.map((s: { type: string }) => (s.type === 'qa' ? { ...s, guide: 'guide:test-engineer' } : s)) };
   assert.deepEqual(validatePipeline(withGuide), []);
   assert.deepEqual(guidesOf(withGuide), ['test-engineer']);
@@ -185,13 +186,26 @@ test('a fast pipeline opens with a blind QA and the build, and has no planner', 
   const seeing = { ...fast, steps: fast.steps.map(s => (s.type === 'qa' ? { ...s, blind: false } : s)) };
   assert.ok(validatePipeline(seeing).some(e => /must be blind/.test(e)));
   const swapped = { ...fast, steps: [fast.steps[1], fast.steps[0], ...fast.steps.slice(2)] };
-  assert.ok(validatePipeline(swapped).some(e => /Before "qa"/.test(e)));
+  assert.ok(validatePipeline(swapped).some(e => /before "qa"/i.test(e)));
   // An Architect may open it, followed by the gate where you approve its design
   const arch = loadPipeline('fast-arch');
   assert.deepEqual(validatePipeline(arch), []);
   const noGate = { ...arch, steps: arch.steps.filter(s => s.id !== 'gate_arch') };
-  assert.ok(validatePipeline(noGate).some(e => /architect step .* then a gate/.test(e)));
-  const inStandard = loadPipeline('standard');
+  assert.ok(validatePipeline(noGate).some(e => /architect step .* only a gate/.test(e)));
+  const inStandard = read('standard');
   const withArchitect = { ...inStandard, steps: [...inStandard.steps.slice(0, -1), { ...arch.steps[0], id: 'arch2' }, inStandard.steps.at(-1)!] };
   assert.ok(validatePipeline(withArchitect).some(e => /belongs in a fast pipeline/.test(e)));
+});
+
+test('add-ons attach to a fast pipeline: research roles first, reviewers after the build, writers last', () => {
+  const def = composePipeline(loadPipeline('fast-arch'), ['codebase', 'security', 'docs']);
+  assert.deepEqual(def.steps.map(s => s.id), ['codebase', 'architect', 'gate_arch', 'qa', 'build', 'security', 'reviewer', 'docs', 'gate_merge']);
+  assert.deepEqual(def.addons, ['codebase', 'security', 'docs']);
+  assert.match(def.name, /\+ Codebase analyst \+ Security review \+ Usage docs$/);
+  assert.throws(() => composePipeline(read('standard'), ['docs']), /attach to fast pipelines/);
+  assert.throws(() => composePipeline(loadPipeline('fast'), ['nope']), /No add-on "nope"/);
+  // Before QA there is room for research only, never for a role that writes code
+  const fast = loadPipeline('fast');
+  const coder = { type: 'agent' as const, id: 'early', name: 'Early', purpose: 'Writes code early.', instructions: 'Write all of the code before anyone else starts.', reads: [], mayWrite: ['src/'], produces: [] };
+  assert.ok(validatePipeline({ ...fast, steps: [coder, ...fast.steps] }).some(e => /research roles/.test(e)));
 });

@@ -2,6 +2,15 @@
 
 อัปเดตล่าสุด: 2026-10-15
 
+## Latest changes (2026-10-15, one set of pipelines)
+- **Ships three ways to run:** Single AI (`--pipeline single`, first in the New run form), `fast` (the default) and `fast-arch`, plus `system-integration` for design only. The nine Planner pipelines (standard, minimal, minimal-skills, with-security x3, with-docs, existing-code, firmware-board), their drafts, two preset pages and the bench arms that used them are gone; three are kept in `test/fixtures/pipelines/` because the Planner engine is still there and tested.
+- **Add-ons** (`pipelines/addons/`): codebase analyst, security audit, usage docs, board and HIL. They attach to fast or fast-arch at start: research roles before QA (reports pasted to the Builder and QA), reviewers after the build, writers before the final gate. New run form shows them as checkboxes; CLI `--addons a,b`; API `addons`.
+- Fast pipelines may now open with research roles (agent steps writing only under `.devcrew/`).
+- Dashboard config sent the old standard pipeline and broke the whole page once it was deleted; it now sends `fast`.
+- Data cleanup: 20 old result suites and 217 of their workspaces deleted (`.devcrew-data` 19 GB to 470 MB); the 14 suites STATUS cites are kept.
+- Next: remove the Planner engine (graph nodes, prompts, fake scripts and the tests that use it).
+- Tests: 67.
+
 ## Latest changes (2026-10-15, other people's workflows on the same tasks)
 `ext-*` arms (`bench/runner/external.ts`) run an outside workflow on its own, on the same workspace and prompt as the single arm, all on Claude Haiku 5.5 through the same proxy; DevCrew only grades with the same hidden tests. Tokens come from Claude Code's transcripts of every session (lead, subagents, teammates), counted as DevCrew counts them; cost from Haiku 5.5 list prices read off a `claude -p` result.
 - `ext-claude-cli`: plain `claude -p`. `ext-bmad`: BMAD Method 6.12.4 installed into the workspace, `/bmad-build-auto` (its unattended spec, plan, build and subagent review). `ext-agent-teams`: Claude Code agent teams, 3 teammates; teams need an interactive session, so `bench/runner/pty-drive.py` runs it in a pty, answers the folder trust question and ends it once the lead stopped and the transcripts are quiet for 90 s.

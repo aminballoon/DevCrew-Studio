@@ -1,0 +1,34 @@
+{
+  "name": "Security review",
+  "description": "For code that handles user input, money or credentials: a security auditor (Semgrep plus a manual audit) reviews the build and sends risky findings back to the Builder, up to twice.",
+  "afterBuild": [
+    {
+      "type": "agent",
+      "id": "security",
+      "name": "Security reviewer",
+      "purpose": "Scans the code with Semgrep and audits it by hand for misuse and data leaks, and sends it back to Dev if something is risky.",
+      "instructions": "guide:security-auditor",
+      "reads": [
+        "git diff",
+        "contracts/"
+      ],
+      "mayWrite": [
+        ".devcrew/security.md"
+      ],
+      "produces": [
+        ".devcrew/security.md: a verdict and security findings by severity"
+      ],
+      "verdict": {
+        "file": ".devcrew/security.md",
+        "onChanges": "dev",
+        "maxRounds": 2
+      },
+      "needs": [
+        "shell"
+      ]
+    }
+  ],
+  "guideHashes": {
+    "security-auditor": "4e32718f0744764a"
+  }
+}

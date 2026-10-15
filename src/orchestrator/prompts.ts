@@ -160,13 +160,13 @@ ${feedback ? `\nA change to the design is asked for. Change it as little as the 
 End with a short summary of the design.`;
 }
 
-export function builderPrompt(requirement: string, clauses: Clause[], guide?: string, architecture: [string, string][] = []): string {
+export function builderPrompt(requirement: string, clauses: Clause[], guide?: string, architecture: [string, string][] = [], reports: [string, string][] = []): string {
   return `${header('dev', 'main', 1)}
 You are the Builder. You alone plan and write the code for this requirement, with your own tests.
 ${sourceOfTruth(requirement, clauses)}
 A QA engineer is writing acceptance tests from the same requirement right now, without seeing your code. Your work is judged by those hidden tests and by yours. Use exactly the names, paths, signatures, errors and formats the requirement gives, because the hidden tests will.
 
-${architecture.length ? `The project's architecture is fixed. Put each piece of code in the module that owns it, import other modules only as "mayUse" allows and only through their "interface", and implement contracts/ exactly. Keep contracts/ in step with the code: when this change adds or changes a public signature, update its contract file in the same change. You cannot change the architecture files. Verify rejects imports that break the rules. If the requirement truly cannot be built inside this architecture, stop and reply with a line starting with "ARCH_CHANGE:" saying what must change and why; a person decides.${filesBlock(architecture)}\n` : ''}Do this:
+${architecture.length ? `The project's architecture is fixed. Put each piece of code in the module that owns it, import other modules only as "mayUse" allows and only through their "interface", and implement contracts/ exactly. Keep contracts/ in step with the code: when this change adds or changes a public signature, update its contract file in the same change. You cannot change the architecture files. Verify rejects imports that break the rules. If the requirement truly cannot be built inside this architecture, stop and reply with a line starting with "ARCH_CHANGE:" saying what must change and why; a person decides.${filesBlock(architecture)}\n` : ''}${reports.length ? `Earlier roles studied the project for this change; use what they found:${filesBlock(reports)}\n` : ''}Do this:
 1. Look at the existing files, then implement everything the requirement asks, in the project's own language and conventions.
 2. Write tests in tests/ for the behaviour the requirement describes, with the project's own test tool, and run them until they pass. Keep them lean.
 3. Write ${runFile(BUILDER_TESTS, 'your tests')}
@@ -175,10 +175,10 @@ Do not write anything under acceptance/. If the requirement contradicts itself, 
 End with a short summary of what you built.`;
 }
 
-export function fastQaPrompt(requirement: string, clauses: Clause[], guide?: string, contracts: [string, string][] = []): string {
+export function fastQaPrompt(requirement: string, clauses: Clause[], guide?: string, contracts: [string, string][] = [], reports: [string, string][] = []): string {
   return `${header('qa')}
 You are the QA engineer. A Builder is writing the code for this requirement right now; you write the acceptance tests that will judge it. The Builder never sees them, only the names and failure messages of the ones that fail.
-${sourceOfTruth(requirement, clauses)}${contracts.length ? `The Builder implements these contracts exactly; test through them.${filesBlock(contracts)}` : ''}
+${sourceOfTruth(requirement, clauses)}${contracts.length ? `The Builder implements these contracts exactly; test through them.${filesBlock(contracts)}` : ''}${reports.length ? `What earlier roles found about the project (the hardware, the rig, the code this change touches):${filesBlock(reports)}` : ''}
 Do this:
 1. Look at the existing files to learn the language, the test tool and any code there already.
 2. Write acceptance tests under acceptance/ (for example acceptance/main.test.ts) that check every clause, using exactly the names, paths and signatures the requirement gives. Import the code from where the requirement or the existing project says it lives. Where the requirement leaves a name open, test only behaviour you can reach through the names it does give.

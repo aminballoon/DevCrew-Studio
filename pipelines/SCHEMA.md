@@ -137,11 +137,20 @@ cannot run until you review it again. A run keeps the guide text it started with
 requirement template, every role and what it hands on, and how to run it. Read those first when
 you only want to use a pipeline.
 
-## Examples
+## What ships
 
-- `standard.json`: Planner, plan gate, QA, build, Reviewer, code gate.
-- `minimal.json`: the same without the Reviewer.
-- `with-security.json`: adds a security reviewer that can send the code back to Dev twice.
-- `existing-code.json`: a codebase analyst before the Planner.
-- `firmware-board.json`: a board researcher and a hardware-in-the-loop rig engineer before the Planner.
-- `system-integration.json`: a design pipeline with a system architecture diagram.
+- **Single AI** (`--pipeline single`, not a file): one agent plans, codes and tests in one session. On every benchmark task so far it scored the same as the teams at a quarter of the tokens; use it by default.
+- `fast.json`: blind QA and one Builder at the same time, Verify, Reviewer, code gate.
+- `fast-arch.json`: the same inside a lasting architecture that an Architect writes once and Verify enforces.
+- `system-integration.json`: a design pipeline with a system architecture diagram, no code.
+
+## Add-ons
+
+`pipelines/addons/<id>.json` holds steps you attach to a fast pipeline when you start a run (New run form, `--addons a,b` on the CLI, `addons` in the API). An add-on lists steps under `start` (research roles before QA; they may only write under `.devcrew/`, and the Builder and QA get their reports), `afterBuild` (reviewers that may send the code back) and `end` (writers before the final gate), plus the `guideHashes` of the role guides it uses.
+
+- `codebase`: a codebase analyst maps what the change touches in an existing project.
+- `security`: a Semgrep-backed security audit that can send the code back twice.
+- `docs`: a usage guide for the next developer.
+- `hardware`: a board researcher and a HIL rig engineer first, a firmware reviewer after the build.
+
+Pipelines with a Planner (one spec gate, QA, Dev per module) are no longer shipped: they cost about three times the fast team for the same result. Their engine remains for now and is tested with the files in `test/fixtures/pipelines/`.

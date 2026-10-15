@@ -1,0 +1,27 @@
+{
+  "name": "Codebase analyst",
+  "description": "For changes to a project that already exists: an analyst maps which files and functions the change touches before the Builder starts, and the Builder and QA get that map.",
+  "start": [
+    {
+      "type": "agent",
+      "id": "codebase",
+      "name": "Codebase analyst",
+      "purpose": "Reviews the code that already exists and shows exactly where the new feature has to change it.",
+      "agent": "claude",
+      "instructions": "guide:codebase-analyst",
+      "reads": [
+        "the existing code in this workspace",
+        "README and docs in this workspace"
+      ],
+      "mayWrite": [
+        ".devcrew/codebase-review.md"
+      ],
+      "produces": [
+        ".devcrew/codebase-review.md: overview, health findings, a change map per feature, and risks"
+      ]
+    }
+  ],
+  "guideHashes": {
+    "codebase-analyst": "0ffd0b1fc4173ec7"
+  }
+}

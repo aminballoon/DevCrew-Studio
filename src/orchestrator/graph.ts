@@ -425,7 +425,18 @@ const archChangeIn = (text: string) => text.match(/^ARCH_CHANGE:\s*(.+)$/m)?.[1]
 export const MAX_ARCH_CHANGES = 2;
 
 /** The fast pipeline's Architect step, when it has one. */
-const architectOf = (def: PipelineDef) => (def.steps[0]?.type === 'agent' && def.steps[0].instructions === 'builtin:architect' ? def.steps[0].id : null);
+const architectOf = (def: PipelineDef) => def.steps.find(x => x.type === 'agent' && x.instructions === 'builtin:architect')?.id ?? null;
+/** Where the build starts: the Architect while the project has no architecture, otherwise QA and the Builder. */
+const buildEntry = (def: PipelineDef) => {
+  const architect = architectOf(def);
+  return {
+    to: (s: S) => (architect && !existsSync(join(s.workspace!.path, ARCHITECTURE_FILE)) ? architect : 'qa'),
+    targets: architect ? [architect, 'qa'] : ['qa'],
+  };
+};
+/** Reports of the research roles before QA (add-ons such as the codebase analyst), for the Builder and QA. */
+const researchReports = (def: PipelineDef, ws: string) =>
+  pasteFiles(ws, def.steps.slice(0, def.steps.findIndex(x => x.type === 'qa')).flatMap(x => (x.type === 'agent' && x.instructions !== 'builtin:architect' ? x.mayWrite : [])));
 
 /** What a Builder's answer hands on: an architecture change goes to the Architect as its feedback. */
 const builderAsks = (def: PipelineDef, s: S, text: string) => {
@@ -462,13 +473,14 @@ const fastWork = (def: PipelineDef) => node('qa', async s => {
   hideAcceptance(s);
 
   const architecture = architectureFiles(ws);
+  const reports = researchReports(def, ws);
   const builder: TurnContext = { ...ctx(s, 'dev', { from: ['You: the requirement', ...(architecture.length ? ['Architect: the architecture'] : [])], reads: [], to: ['Verify'] }), scope: builderScope(ws) };
   const qa: TurnContext = { ...ctx(s, 'qa', { from: ['You: the requirement'], reads: [], to: ['Verify (judge with them)'] }), workspace: copy, scope: FAST_QA_SCOPE };
   getBus().emit(s.runId, { type: 'node_started', node: 'dev', module: MAIN.id, attempt: 1 });
   const [built] = await Promise.all([
-    agentTurn(builder, builderPrompt(s.requirement, clauses, guideOf(def, 'build'), architecture)).then(async turn => ({ turn, run: await testRunOf(builder, BUILDER_TESTS) })),
+    agentTurn(builder, builderPrompt(s.requirement, clauses, guideOf(def, 'build'), architecture, reports)).then(async turn => ({ turn, run: await testRunOf(builder, BUILDER_TESTS) })),
     // QA writes against the same contracts the Builder implements
-    agentTurn(qa, fastQaPrompt(s.requirement, clauses, guideOf(def, 'qa'), pasteFiles(ws, ['contracts/']))).then(async () => {
+    agentTurn(qa, fastQaPrompt(s.requirement, clauses, guideOf(def, 'qa'), pasteFiles(ws, ['contracts/']), reports)).then(async () => {
       if (countDeclaredTests(copy, `${ACCEPTANCE}/`) === 0) {
         await agentTurn({ ...qa, continues: true }, `No test cases were found under ${ACCEPTANCE}/. Write the acceptance tests now.`);
       }
@@ -729,7 +741,7 @@ const finish = async (s: S): Promise<U> => {
  * dev / verify / escalate for the build step, so the standard pipeline keeps the
  * node names runs have always used.
  */
-export function buildGraph(def: PipelineDef = loadPipeline('standard')) {
+export function buildGraph(def: PipelineDef = loadPipeline('fast')) {
   const steps = def.steps;
   const at = (id: string) => steps.findIndex(x => x.id === id);
   const next = (id: string) => steps[at(id) + 1];
@@ -749,7 +761,10 @@ export function buildGraph(def: PipelineDef = loadPipeline('standard')) {
     const after = nextNode('build');
     // The Architect (and your approval of its design) only runs while the project has no architecture
     const architect = architectOf(def);
-    g.addConditionalEdges('setup', (s: S) => (architect && !existsSync(join(s.workspace!.path, ARCHITECTURE_FILE)) ? architect : 'qa'), architect ? [architect, 'qa'] : ['qa'])
+    // Research roles run first; then the Architect, only while the project has no architecture
+    const entry = buildEntry(def);
+    const first = steps[0].type === 'agent' && steps[0].id !== architect ? steps[0].id : null;
+    (first ? g.addEdge('setup', first) : g.addConditionalEdges('setup', entry.to, entry.targets))
       // A Builder that needs another architecture goes to the Architect (and your approval), or to you
       .addNode('qa', fastWork(def)).addConditionalEdges('qa', (s: S) => (s.archChange ? (s.revisedTo ?? 'escalate') : 'verify'), ['verify', 'escalate', ...(architect ? [architect] : [])])
       .addNode('dev', fastDev(def)).addNode('verify', fastVerify).addNode('dispute', qaDispute(def)).addNode('escalate', escalate)
@@ -804,6 +819,13 @@ export function buildGraph(def: PipelineDef = loadPipeline('standard')) {
         break;
       }
       case 'agent': {
+        // The last research role hands over to the Architect or straight to QA and the Builder
+        const architect = architectOf(def);
+        if (isFast(def) && step.id !== architect && (next(step.id)?.id === architect || next(step.id)?.type === 'qa')) {
+          const entry = buildEntry(def);
+          g.addNode(step.id, agentNode(step, next(step.id), false)).addConditionalEdges(step.id, entry.to, entry.targets);
+          break;
+        }
         const after = nextNode(step.id);
         // Only steps after build can send work back to Dev (the validator enforces it)
         const canSendBack = step.verdict?.onChanges === 'dev' && build;

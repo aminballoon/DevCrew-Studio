@@ -1,8 +1,7 @@
 {
-  "id": "firmware-board",
-  "name": "Firmware for a custom board",
-  "description": "For firmware on a microcontroller board, for example STM32. Put the PCB layout, schematic and CubeMX .ioc file in the project folder, or just name the board in the requirement. A board researcher works out the hardware, a rig engineer sets up how the AI flashes and tests the real board, and the tests run on the hardware itself.",
-  "steps": [
+  "name": "Board and HIL",
+  "description": "For firmware on a real board: a researcher works out the board, a rig engineer sets up flashing and on-board tests before the build, and a firmware reviewer checks the result against the hardware.",
+  "start": [
     {
       "type": "agent",
       "id": "board",
@@ -44,27 +43,9 @@
       "produces": [
         ".devcrew/hil/: rig.json, probe.sh, flash.sh, monitor.sh, run.sh with a per-board lock, and RIG.md with setup steps and the commands tests call"
       ]
-    },
-    {
-      "type": "planner",
-      "id": "planner"
-    },
-    {
-      "type": "gate",
-      "id": "gate_spec",
-      "title": "Review the board, the test rig and the plan",
-      "review": "plan",
-      "reviseTo": "hil"
-    },
-    {
-      "type": "qa",
-      "id": "qa"
-    },
-    {
-      "type": "build",
-      "id": "build",
-      "maxAttempts": 4
-    },
+    }
+  ],
+  "afterBuild": [
     {
       "type": "agent",
       "id": "firmware",
@@ -74,7 +55,6 @@
       "instructions": "guide:firmware-reviewer",
       "reads": [
         "git diff",
-        ".devcrew/PRD.md",
         ".devcrew/hardware/board.md",
         ".devcrew/hil/RIG.md",
         "contracts/"
@@ -90,13 +70,6 @@
         "onChanges": "dev",
         "maxRounds": 2
       }
-    },
-    {
-      "type": "gate",
-      "id": "gate_merge",
-      "title": "Approve the merge",
-      "review": "code",
-      "reviseTo": "build"
     }
   ],
   "guideHashes": {

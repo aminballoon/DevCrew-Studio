@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { createServer, type IncomingHttpHeaders } from 'node:http';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -37,7 +37,7 @@ test('a waiting gate is sent to OpenClaw and Hermes, and the chat agent can answ
   };
   try {
     const runs = new RunManager();
-    const runId = runs.start({ requirement: 'Shopping cart\nmore', source: join(STUDIO_ROOT, 'bench/tasks/S-01-cart/seed'), profile: 'fake' });
+    const runId = runs.start({ requirement: 'Shopping cart\nmore', source: join(STUDIO_ROOT, 'bench/tasks/S-01-cart/seed'), profile: 'fake', pipeline: JSON.parse(readFileSync(join(STUDIO_ROOT, 'test/fixtures/pipelines/standard.json'), 'utf8')) });
     await new Promise<void>(resolve => getBus().subscribe(e => { if (e.runId === runId && e.type === 'gate_waiting') resolve(); }));
 
     const oc = got.find(g => g.path === '/hooks/agent')!;

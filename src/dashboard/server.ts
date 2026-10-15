@@ -7,7 +7,7 @@ import { listenDiscord } from '../core/discord';
 import type { GateAnswer } from '../orchestrator/graph';
 import { RunManager } from '../orchestrator/RunManager';
 import { ROLE_CONTRACTS } from '../orchestrator/roles';
-import { listPipelines, loadPipeline, reviewDraft } from '../pipeline/schema';
+import { listAddons, listPipelines, loadPipeline, reviewDraft } from '../pipeline/schema';
 import { getBus, getConfig } from '../orchestrator/runtime';
 
 const PORT = Number(process.env.PORT ?? 4317);
@@ -92,7 +92,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 
   if (path === '/api/config' && req.method === 'GET') {
     const cfg = getConfig();
-    return json(res, 200, { profiles: Object.keys(cfg.profiles), defaultProfile: cfg.defaultProfile, maxFixAttempts: cfg.maxFixAttempts, roles: cfg.profiles, profileNotes: cfg.profileNotes ?? {}, studioRoot: STUDIO_ROOT, contracts: ROLE_CONTRACTS, standardPipeline: loadPipeline('standard') });
+    return json(res, 200, { profiles: Object.keys(cfg.profiles), defaultProfile: cfg.defaultProfile, maxFixAttempts: cfg.maxFixAttempts, roles: cfg.profiles, profileNotes: cfg.profileNotes ?? {}, studioRoot: STUDIO_ROOT, contracts: ROLE_CONTRACTS, defaultPipeline: loadPipeline('fast') });
   }
   if (path === '/api/runs' && req.method === 'GET') { return json(res, 200, runs.list()); }
   if (path === '/api/runs' && req.method === 'POST') {
@@ -107,6 +107,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       autoApprove: body.autoApprove === true,
       label: typeof body.label === 'string' ? body.label : undefined,
       pipeline: typeof body.pipeline === 'string' && body.pipeline ? body.pipeline : undefined,
+      addons: Array.isArray(body.addons) ? body.addons.filter((x: unknown): x is string => typeof x === 'string') : undefined,
       });
     } catch (e) {
       return json(res, 400, { error: (e as Error).message });
@@ -125,6 +126,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   if (runMatch && req.method === 'GET') { return json(res, 200, runs.events(runMatch[1])); }
   if (path === '/api/stream') { return stream(req, res, url.searchParams.get('run')); }
   if (path === '/api/pipelines' && req.method === 'GET') { return json(res, 200, listPipelines()); }
+  if (path === '/api/addons' && req.method === 'GET') { return json(res, 200, listAddons().map(({ id, name, description }) => ({ id, name, description }))); }
   const pipelineReview = path.match(/^\/api\/pipelines\/([\w-]+)\/review$/);
   if (pipelineReview && req.method === 'POST') {
     const body = await readBody(req);

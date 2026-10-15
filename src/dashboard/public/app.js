@@ -120,7 +120,7 @@ function buildSteps(events) {
 
 function buildModel(events) {
   const started = events.find(e => e.type === 'run_started');
-  DEF = started?.pipeline ?? S.config?.standardPipeline ?? null;
+  DEF = started?.pipeline ?? S.config?.defaultPipeline ?? null;
   const steps = buildSteps(events);
   const m = { def: DEF, steps, status: 'running', stages: {}, edges: {}, lastEdge: null, gate: null, modules: new Map(), plan: null, fixes: 0, guards: 0, tokens: 0, cost: 0, byRole: {} };
   const st = id => (m.stages[id] ??= { state: 'idle', visits: 0 });
@@ -1450,8 +1450,13 @@ async function loadPipelines() {
   return S.pipelines;
 }
 
+const SINGLE_OPTION = { id: 'single', def: { name: 'Single AI', description: 'One AI plans, codes and tests the whole task in one session. Cheapest and fastest; on small and medium tasks it scored the same as every team.' } };
+
 async function openNewRun(pipelineId) {
-  const approved = (await loadPipelines()).filter(p => !p.draft && !p.errors.length);
+  const approved = [SINGLE_OPTION, ...(await loadPipelines()).filter(p => !p.draft && !p.errors.length)];
+  S.pipelineChoices = approved;
+  S.addons ??= await (await fetch('/api/addons')).json();
+  $('#addon-list').innerHTML = S.addons.map(a => `<label class="check" title="${esc(a.description)}"><input type="checkbox" name="addons" value="${esc(a.id)}"> ${esc(a.name)} <span class="hint">${esc(a.description)}</span></label>`).join('');
   $('#pipeline-select').innerHTML = approved.map(p => `<option value="${esc(p.id)}" ${p.id === (pipelineId ?? 'fast') ? 'selected' : ''}>${esc(p.def.name)}</option>`).join('');
   $('#pipeline-select').dispatchEvent(new Event('change'));
   $('#start-error').textContent = '';
@@ -1766,14 +1771,16 @@ async function boot() {
 
   $('#new-run-btn').addEventListener('click', () => openNewRun());
   $('#pipeline-select').addEventListener('change', () => {
-    const p = S.pipelines?.find(x => x.id === $('#pipeline-select').value);
+    const p = S.pipelineChoices?.find(x => x.id === $('#pipeline-select').value);
     $('#pipeline-note').textContent = p?.def?.description ?? '';
+    // Add-ons attach to the fast pipelines only
+    $('#addons').hidden = p?.def?.kind !== 'fast';
   });
   $('#new-run-form').addEventListener('submit', async e => {
     if (e.submitter?.value !== 'start') return;
     const f = new FormData(e.target);
     const r = await fetch('/api/runs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
-      requirement: f.get('requirement'), label: f.get('label'), source: f.get('source'), profile: f.get('profile'), pipeline: f.get('pipeline'), autoApprove: f.get('autoApprove') === 'on',
+      requirement: f.get('requirement'), label: f.get('label'), source: f.get('source'), profile: f.get('profile'), pipeline: f.get('pipeline'), addons: $('#addons').hidden ? [] : f.getAll('addons'), autoApprove: f.get('autoApprove') === 'on',
     }) });
     const out = await r.json();
     if (!r.ok) { e.preventDefault(); $('#start-error').textContent = out.error; return; }

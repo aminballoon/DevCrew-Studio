@@ -1,22 +1,45 @@
 {
   "id": "fast",
   "name": "Fast team",
-  "description": "One Builder plans and writes the code while a blind QA writes hidden tests from the requirement at the same time; a reviewer reads only the diff. The quickest team; use it unless you want to approve a plan before any code is written.",
+  "description": "One Builder plans and writes the code while a blind QA writes hidden tests from the requirement at the same time; a reviewer reads only the diff. The default team; add-on steps attach to it.",
   "kind": "fast",
   "steps": [
-    { "type": "qa", "id": "qa", "blind": true },
-    { "type": "build", "id": "build" },
+    {
+      "type": "qa",
+      "id": "qa",
+      "blind": true
+    },
+    {
+      "type": "build",
+      "id": "build"
+    },
     {
       "type": "agent",
       "id": "reviewer",
       "name": "Reviewer",
       "purpose": "Reads only the changes, with a fresh mind, and sends real problems back to the Builder once.",
       "instructions": "builtin:reviewer",
-      "reads": ["git diff"],
-      "mayWrite": [".devcrew/review.md"],
-      "produces": [".devcrew/review.md: verdict and findings"],
-      "verdict": { "file": ".devcrew/review.md", "onChanges": "dev", "maxRounds": 1 }
+      "reads": [
+        "git diff"
+      ],
+      "mayWrite": [
+        ".devcrew/review.md"
+      ],
+      "produces": [
+        ".devcrew/review.md: verdict and findings"
+      ],
+      "verdict": {
+        "file": ".devcrew/review.md",
+        "onChanges": "dev",
+        "maxRounds": 1
+      }
     },
-    { "type": "gate", "id": "gate_merge", "title": "Approve the merge", "review": "code", "reviseTo": "build" }
+    {
+      "type": "gate",
+      "id": "gate_merge",
+      "title": "Approve the merge",
+      "review": "code",
+      "reviseTo": "build"
+    }
   ]
 }

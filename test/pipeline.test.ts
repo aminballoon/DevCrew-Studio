@@ -13,14 +13,16 @@ process.env.FAKE_DELAY_MS = '0';
 const { RunManager } = await import('../src/orchestrator/RunManager');
 const { getBus } = await import('../src/orchestrator/runtime');
 const { STUDIO_ROOT } = await import('../src/core/config');
-const { loadPipeline } = await import('../src/pipeline/schema');
 type PipelineDef = import('../src/pipeline/schema').PipelineDef;
 
 const TASK = join(STUDIO_ROOT, 'bench/tasks/S-01-cart');
+// The scripted fake agents follow a Planner pipeline; those are kept as test fixtures
+const fixture = (id: string): PipelineDef => JSON.parse(readFileSync(join(STUDIO_ROOT, 'test/fixtures/pipelines', `${id}.json`), 'utf8'));
+const STANDARD = fixture('standard');
 
 test('scripted run goes through every stage, reverts the test tampering and loops once', { timeout: 60_000 }, async () => {
   const runs = new RunManager();
-  const runId = runs.start({ requirement: readFileSync(join(TASK, 'requirement.md'), 'utf8'), source: join(TASK, 'seed'), profile: 'fake', autoApprove: true });
+  const runId = runs.start({ pipeline: STANDARD, requirement: readFileSync(join(TASK, 'requirement.md'), 'utf8'), source: join(TASK, 'seed'), profile: 'fake', autoApprove: true });
   const status = await runs.waitFor(runId);
   const events = getBus().read(runId);
 
@@ -59,7 +61,7 @@ test('scripted run goes through every stage, reverts the test tampering and loop
 
 test('a run pauses at the spec gate and continues after approval', { timeout: 60_000 }, async () => {
   const runs = new RunManager();
-  const runId = runs.start({ requirement: 'cart', source: join(TASK, 'seed'), profile: 'fake' });
+  const runId = runs.start({ pipeline: STANDARD, requirement: 'cart', source: join(TASK, 'seed'), profile: 'fake' });
   await new Promise<void>(resolve => getBus().subscribe(e => { if (e.runId === runId && e.type === 'gate_waiting') resolve(); }));
   const waiting = getBus().read(runId).find(e => e.type === 'gate_waiting');
   assert.equal(waiting?.type === 'gate_waiting' && waiting.gate, 'gate_spec');
@@ -71,7 +73,7 @@ test('a run pauses at the spec gate and continues after approval', { timeout: 60
 test('medium scenario: revising the plan produces a second architecture with an entry point', { timeout: 60_000 }, async () => {
   const runs = new RunManager();
   const task = join(STUDIO_ROOT, 'bench/tasks/M-01-expenses');
-  const runId = runs.start({ requirement: readFileSync(join(task, 'requirement.md'), 'utf8'), source: join(task, 'seed'), profile: 'fake-expenses' });
+  const runId = runs.start({ pipeline: STANDARD, requirement: readFileSync(join(task, 'requirement.md'), 'utf8'), source: join(task, 'seed'), profile: 'fake-expenses' });
   const waitGate = () => new Promise<void>(resolve => {
     const off = getBus().subscribe(e => { if (e.runId === runId && e.type === 'gate_waiting') { off(); resolve(); } });
   });
@@ -100,7 +102,7 @@ test('medium scenario: revising the plan produces a second architecture with an 
 
 test('trouble scenario: an unattended run that never passes ends as failed', { timeout: 60_000 }, async () => {
   const runs = new RunManager();
-  const runId = runs.start({ requirement: 'cart', source: join(TASK, 'seed'), profile: 'fake-trouble', autoApprove: true });
+  const runId = runs.start({ pipeline: STANDARD, requirement: 'cart', source: join(TASK, 'seed'), profile: 'fake-trouble', autoApprove: true });
   assert.equal(await runs.waitFor(runId), 'failed');
   const events = getBus().read(runId);
   const attempts = events.filter(e => e.type === 'verify_result');
@@ -116,7 +118,7 @@ test('trouble scenario: an unattended run that never passes ends as failed', { t
 
 test('a security step sends the code back to Dev once, then the run continues', { timeout: 60_000 }, async () => {
   const runs = new RunManager();
-  const runId = runs.start({ requirement: 'cart', source: join(TASK, 'seed'), profile: 'fake', autoApprove: true, pipeline: 'with-security' });
+  const runId = runs.start({ requirement: 'cart', source: join(TASK, 'seed'), profile: 'fake', autoApprove: true, pipeline: fixture('with-security') });
   assert.equal(await runs.waitFor(runId), 'approved');
   const events = getBus().read(runId);
   const stages = events.flatMap(e => (e.type === 'node_started' ? [e.node] : []));
@@ -131,7 +133,7 @@ test('a security step sends the code back to Dev once, then the run continues', 
 
 test('the minimal pipeline has no reviewer', { timeout: 60_000 }, async () => {
   const runs = new RunManager();
-  const runId = runs.start({ requirement: 'cart', source: join(TASK, 'seed'), profile: 'fake', autoApprove: true, pipeline: 'minimal' });
+  const runId = runs.start({ requirement: 'cart', source: join(TASK, 'seed'), profile: 'fake', autoApprove: true, pipeline: fixture('minimal') });
   assert.equal(await runs.waitFor(runId), 'approved');
   const stages = getBus().read(runId).flatMap(e => (e.type === 'node_started' ? [e.node] : []));
   assert.ok(!stages.includes('reviewer'));
@@ -145,7 +147,7 @@ const waitForGate = (runId: string) => new Promise<Record<string, unknown> & { g
 });
 
 test('a role before the planner hands its report to the Planner and to the plan gate', { timeout: 60_000 }, async () => {
-  const standard = loadPipeline('standard');
+  const standard = fixture('standard');
   const def = {
     ...standard, id: 'pre-planner-test',
     steps: [{ type: 'agent' as const, id: 'codebase', name: 'Codebase analyst', purpose: 'Reviews the existing code.', instructions: 'Review the existing code and map the changes.', reads: [], mayWrite: ['.devcrew/codebase-review.md'], produces: [] }, ...standard.steps],
@@ -218,7 +220,7 @@ test('a design pipeline shows the system diagram, sends feedback back to the arc
 
 test('resume refuses a run that waits at a gate or has finished', { timeout: 60_000 }, async () => {
   const runs = new RunManager();
-  const runId = runs.start({ requirement: 'cart', source: join(TASK, 'seed'), profile: 'fake' });
+  const runId = runs.start({ pipeline: STANDARD, requirement: 'cart', source: join(TASK, 'seed'), profile: 'fake' });
   await waitForGate(runId);
   await assert.rejects(runs.resume(runId), /waiting at a gate/i);
   const finished = runs.waitFor(runId);
@@ -229,7 +231,7 @@ test('resume refuses a run that waits at a gate or has finished', { timeout: 60_
 
 test('a run whose process dies is shown as stopped and resumes to the end; a live one cannot be resumed twice', { timeout: 90_000 }, async () => {
   const { spawn } = await import('node:child_process');
-  const child = spawn(process.execPath, ['--import', 'tsx', 'src/cli.ts', 'start', '--requirement', join(TASK, 'requirement.md'), '--source', join(TASK, 'seed'), '--profile', 'fake', '--auto'], {
+  const child = spawn(process.execPath, ['--import', 'tsx', 'src/cli.ts', 'start', '--requirement', join(TASK, 'requirement.md'), '--source', join(TASK, 'seed'), '--profile', 'fake-fast', '--pipeline', 'fast', '--auto'], {
     cwd: STUDIO_ROOT, env: { ...process.env, FAKE_DELAY_MS: '400' }, stdio: ['ignore', 'pipe', 'pipe'],
   });
   let out = '';
@@ -254,7 +256,7 @@ test('a run whose process dies is shown as stopped and resumes to the end; a liv
   await runs.resume(runId);
   assert.equal(await done, 'approved');
   const stages = getBus().read(runId).flatMap(e => (e.type === 'node_started' ? [e.node] : []));
-  assert.equal(stages.filter(s => s === 'planner').length, 1, 'the planner is not repeated');
+  assert.equal(stages.filter(s => s === 'reviewer').length, 1, 'finished steps are not repeated');
 });
 
 test('a run that fails mid-way still stops the agents of earlier steps and what they left running', { timeout: 60_000 }, async () => {
@@ -262,7 +264,7 @@ test('a run that fails mid-way still stops the agents of earlier steps and what 
   process.env.FAKE_MARKER = marker;
   const alive = () => { try { return execSync(`pgrep -f "${marker}"`).toString().trim().length > 0; } catch { return false; } };
   const runs = new RunManager();
-  const runId = runs.start({ requirement: readFileSync(join(TASK, 'requirement.md'), 'utf8'), source: join(TASK, 'seed'), profile: 'fake-crash', autoApprove: true });
+  const runId = runs.start({ pipeline: STANDARD, requirement: readFileSync(join(TASK, 'requirement.md'), 'utf8'), source: join(TASK, 'seed'), profile: 'fake-crash', autoApprove: true });
   assert.equal(await runs.waitFor(runId), 'failed');
   for (let i = 0; i < 50 && alive(); i++) { await new Promise(r => setTimeout(r, 100)); }
   assert.equal(alive(), false, "the Planner's background command was stopped");
@@ -270,7 +272,7 @@ test('a run that fails mid-way still stops the agents of earlier steps and what 
 
 test('a disputed test goes back to QA, not to a new plan', { timeout: 60_000 }, async () => {
   const runs = new RunManager();
-  const runId = runs.start({ requirement: readFileSync(join(TASK, 'requirement.md'), 'utf8'), source: join(TASK, 'seed'), profile: 'fake-dispute', autoApprove: true });
+  const runId = runs.start({ pipeline: STANDARD, requirement: readFileSync(join(TASK, 'requirement.md'), 'utf8'), source: join(TASK, 'seed'), profile: 'fake-dispute', autoApprove: true });
   const status = await runs.waitFor(runId);
   const events = getBus().read(runId);
   assert.equal(status, 'approved', JSON.stringify(events.filter(e => e.type === 'log')));
@@ -286,7 +288,7 @@ test('a session past the token limit starts fresh for its next full prompt, and 
   cfg.freshSessionAboveTokens = 1;
   try {
     const runs = new RunManager();
-    const runId = runs.start({ requirement: readFileSync(join(TASK, 'requirement.md'), 'utf8'), source: join(TASK, 'seed'), profile: 'fake-dispute', autoApprove: true });
+    const runId = runs.start({ pipeline: STANDARD, requirement: readFileSync(join(TASK, 'requirement.md'), 'utf8'), source: join(TASK, 'seed'), profile: 'fake-dispute', autoApprove: true });
     const status = await runs.waitFor(runId);
     assert.equal(status, 'approved', JSON.stringify(getBus().read(runId).filter(e => e.type === 'log' || e.type === 'run_finished')).slice(0, 3000));
     const fresh = getBus().read(runId).flatMap(e => (e.type === 'log' && /starting a fresh session/.test(e.message) ? [e.message.split(':')[0]] : []));
@@ -383,7 +385,7 @@ test('fast-arch: a Builder that needs another design gets it from the Architect 
 });
 
 test('blind QA keeps the acceptance tests away from Dev and judges with them', { timeout: 60_000 }, async () => {
-  const minimal = loadPipeline('minimal');
+  const minimal = fixture('minimal');
   const def: PipelineDef = { ...minimal, id: 'blind-test', steps: minimal.steps.map(s => (s.type === 'qa' ? { ...s, blind: true } : s)) };
   const runs = new RunManager();
   const seen: boolean[] = [];
@@ -409,7 +411,7 @@ test('blind QA keeps the acceptance tests away from Dev and judges with them', {
 });
 
 test('blind QA: a hidden test that fails twice in a row goes back to QA to check', { timeout: 60_000 }, async () => {
-  const minimal = loadPipeline('minimal');
+  const minimal = fixture('minimal');
   const def: PipelineDef = { ...minimal, id: 'blind-wrong-test', steps: minimal.steps.map(s => (s.type === 'qa' ? { ...s, blind: true } : s)) };
   const runs = new RunManager();
   const runId = runs.start({ requirement: readFileSync(join(TASK, 'requirement.md'), 'utf8'), source: join(TASK, 'seed'), profile: 'fake-blind-wrong', autoApprove: true, pipeline: def });
@@ -424,11 +426,25 @@ test('blind QA: a hidden test that fails twice in a row goes back to QA to check
 
 test('a conflict the agents cannot settle stops after two replans', { timeout: 90_000 }, async () => {
   const runs = new RunManager();
-  const runId = runs.start({ requirement: readFileSync(join(TASK, 'requirement.md'), 'utf8'), source: join(TASK, 'seed'), profile: 'fake-conflict', autoApprove: true });
+  const runId = runs.start({ pipeline: STANDARD, requirement: readFileSync(join(TASK, 'requirement.md'), 'utf8'), source: join(TASK, 'seed'), profile: 'fake-conflict', autoApprove: true });
   const status = await runs.waitFor(runId);
   const events = getBus().read(runId);
   assert.equal(status, 'failed');
   assert.equal(events.filter(e => e.type === 'node_started' && e.node === 'planner').length, 3);
   const end = events.findLast(e => e.type === 'run_finished');
   assert.match(end?.type === 'run_finished' ? end.error ?? '' : '', /Stopped after 2 replans: .*need a human/);
+});
+
+test('fast with an add-on: the research role runs first and the Builder and QA get its report; "single" runs one agent', { timeout: 60_000 }, async () => {
+  const runs = new RunManager();
+  const runId = runs.start({ requirement: readFileSync(join(TASK, 'requirement.md'), 'utf8'), source: join(TASK, 'seed'), profile: 'fake-fast', autoApprove: true, pipeline: 'fast', addons: ['codebase'] });
+  assert.equal(await runs.waitFor(runId), 'approved', JSON.stringify(getBus().read(runId).filter(e => e.type === 'log' || e.type === 'run_finished')).slice(0, 2000));
+  const events = getBus().read(runId);
+  assert.deepEqual(events.flatMap(e => (e.type === 'node_started' ? [e.node] : [])).slice(0, 2), ['codebase', 'qa']);
+  const started = events.find(e => e.type === 'run_started');
+  assert.deepEqual(started?.type === 'run_started' && started.pipeline?.addons, ['codebase']);
+
+  const single = runs.start({ requirement: readFileSync(join(TASK, 'requirement.md'), 'utf8'), source: join(TASK, 'seed'), profile: 'fake', pipeline: 'single' });
+  assert.equal(await runs.waitFor(single), 'completed');
+  assert.equal(getBus().read(single).find(e => e.type === 'run_started')?.type === 'run_started' && (getBus().read(single).find(e => e.type === 'run_started') as { mode: string }).mode, 'single');
 });

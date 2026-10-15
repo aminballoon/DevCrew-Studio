@@ -1,13 +1,11 @@
 # Pipeline presets
 
-Ready-made pipelines for common kinds of work. Each file here explains one preset: when to use
+Ready-made pipelines for common kinds of work. Changing an existing codebase and firmware on a real board are now add-ons to the fast pipeline (`pipelines/addons/codebase.json`, `hardware.json`; see `pipelines/SCHEMA.md`). Each file here explains one preset: when to use
 it, what to prepare, what every role does and hands on, what you review, and how to start it.
 An agent (or a person) can read one file and run the preset without reading anything else.
 
 | Preset | Use it for | Kind | Definition |
 |---|---|---|---|
-| [existing-code](existing-code.md) | Adding a feature to a codebase that already exists | build | `pipelines/existing-code.json` |
-| [firmware-board](firmware-board.md) | Firmware for a microcontroller board, tested on the real hardware | build | `pipelines/firmware-board.json` |
 | [system-integration](system-integration.md) | Designing a hardware and software system and choosing parts, no code | design | `pipelines/system-integration.json` |
 
 The definition (the `.json` file) is what DevCrew runs. These pages describe it; if the two ever

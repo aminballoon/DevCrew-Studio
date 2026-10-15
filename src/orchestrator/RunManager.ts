@@ -7,9 +7,10 @@ import { SqliteSaver } from '@langchain/langgraph-checkpoint-sqlite';
 import { DATA_ROOT, runDir } from '../core/config';
 import { gateDecisions, notifyGate } from '../core/notify';
 import { usageByRole, type DevcrewEvent, type GateId } from '../core/events';
-import { loadPipeline, validatePipeline, withGuides, type PipelineDef } from '../pipeline/schema';
+import { composePipeline, loadPipeline, validatePipeline, withGuides, type PipelineDef } from '../pipeline/schema';
 import { buildGraph, type GateAnswer } from './graph';
 import { checkCapabilities, closeSessions, getBus, getConfig } from './runtime';
+import { runSingle } from './single';
 
 export interface StartOptions {
   requirement: string;
@@ -17,8 +18,10 @@ export interface StartOptions {
   profile?: string;
   autoApprove?: boolean;
   label?: string;
-  /** Approved pipeline id from pipelines/ (default "standard"), or a definition (tests). */
+  /** "single" (one agent does it all), an approved pipeline id from pipelines/ (default "fast"), or a definition (tests). */
   pipeline?: string | PipelineDef;
+  /** Add-on steps from pipelines/addons/, attached to a fast pipeline. */
+  addons?: string[];
 }
 
 export interface RunSummary {
@@ -98,13 +101,19 @@ export class RunManager {
   /** The pipeline a run was started with; runs from before pipelines existed used the standard one. */
   private pipelineOf(runId: string): PipelineDef {
     const started = getBus().read(runId).find(e => e.type === 'run_started');
-    return (started?.type === 'run_started' && started.pipeline) || loadPipeline('standard');
+    return (started?.type === 'run_started' && started.pipeline) || loadPipeline('fast');
   }
 
   start(opts: StartOptions): string {
-    // A run keeps the guide texts it started with, so editing a guide never changes a running pipeline
-    const def = withGuides(typeof opts.pipeline === 'object' ? checked(opts.pipeline) : loadPipeline(opts.pipeline ?? 'standard'));
     const profile = opts.profile ?? getConfig().defaultProfile;
+    if (opts.pipeline === 'single') {
+      const runId = `${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${randomUUID().slice(0, 6)}`;
+      void runSingle({ requirement: opts.requirement, source: opts.source, profile, process: false, label: opts.label, runId }).then(r => this.finished.get(runId)?.(r.status));
+      return runId;
+    }
+    // A run keeps the guide texts it started with, so editing a guide never changes a running pipeline
+    const base = typeof opts.pipeline === 'object' ? checked(opts.pipeline) : loadPipeline(opts.pipeline ?? 'fast');
+    const def = withGuides(composePipeline(base, opts.addons ?? []));
     const { errors, warnings } = checkCapabilities(getConfig(), profile, def);
     if (errors.length) { throw new Error(`This profile cannot run the "${def.id}" pipeline:\n- ${errors.join('\n- ')}`); }
     const runId = `${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${randomUUID().slice(0, 6)}`;

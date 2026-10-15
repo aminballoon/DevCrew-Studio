@@ -1,0 +1,24 @@
+{
+  "name": "Usage docs",
+  "description": "A docs writer adds docs/USAGE.md for the next developer after the code passes review. Advisory: it never blocks the merge.",
+  "end": [
+    {
+      "type": "agent",
+      "id": "docs",
+      "name": "Docs writer",
+      "purpose": "Writes a short guide that explains how to use what was built, for the next person who picks it up.",
+      "instructions": "Write docs/USAGE.md for a developer who will use this code for the first time: what it does in two sentences, how to import or run it, three to five short examples taken from the tests, and the errors it can raise and when. Keep it under 150 lines, use the names exactly as the contracts define them, and do not describe internal details.",
+      "reads": [
+        "git diff",
+        "contracts/",
+        "tests/"
+      ],
+      "mayWrite": [
+        "docs/"
+      ],
+      "produces": [
+        "docs/USAGE.md: a short usage guide with examples"
+      ]
+    }
+  ]
+}
