@@ -1,0 +1,1 @@
+{"id":"ext-claude-cli","mode":"external","workflow":"claude-cli","model":"claude-haiku-5-5","profile":"external","name":"Outside: claude-cli","role":"control"}

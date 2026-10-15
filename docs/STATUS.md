@@ -2,6 +2,23 @@
 
 อัปเดตล่าสุด: 2026-10-15
 
+## Latest changes (2026-10-15, other people's workflows on the same tasks)
+`ext-*` arms (`bench/runner/external.ts`) run an outside workflow on its own, on the same workspace and prompt as the single arm, all on Claude Haiku 5.5 through the same proxy; DevCrew only grades with the same hidden tests. Tokens come from Claude Code's transcripts of every session (lead, subagents, teammates), counted as DevCrew counts them; cost from Haiku 5.5 list prices read off a `claude -p` result.
+- `ext-claude-cli`: plain `claude -p`. `ext-bmad`: BMAD Method 6.12.4 installed into the workspace, `/bmad-build-auto` (its unattended spec, plan, build and subagent review). `ext-agent-teams`: Claude Code agent teams, 3 teammates; teams need an interactive session, so `bench/runner/pty-drive.py` runs it in a pty, answers the folder trust question and ends it once the lead stopped and the transcripts are quiet for 90 s.
+
+| Arm | Simple set (4 tasks x 2) | Tokens/task | $/task | Min/task | Roadmap XL-06..10 (1 rep) | Tokens/round |
+|---|---|---|---|---|---|---|
+| plain Claude Code | 100% | 0.47M | 0.03 | 1.9 | 5/5, 0 regressions | 0.5-1.1M |
+| Agent teams | 100% | 2.2M | 0.05 | 4.2 | 5/5, 0 regressions | 1.6-2.9M |
+| BMAD | 98% | 2.8M | 0.08 | 9.0 | 5/5, 0 regressions | 3.3-5.6M |
+| DevCrew fast (earlier suites) | 100% | 2.1M | ~0.08 | 5.5 | 5/5, 0 regressions | 2.0-3.4M |
+| DevCrew fast-arch | 100% | 3.2M | | 8.3 | 5/5, 0 regressions | 2.2-3.4M |
+
+- Every team, ours and theirs, costs 4-6x the tokens of one agent for the same score on these tasks, and none of them broke earlier behaviour over five changes; neither did the single agent. DevCrew fast sits with agent teams; BMAD costs the most.
+- `npx tsx bench/runner/locality.ts <suite>`: source files each change edited. Share of the project per change: fast-arch 18-47%, fast 30-70%, agent teams 50-67%, BMAD 33-56%, plain 25-58% (fast-arch has 3x the files, so it edits more files but a smaller share). The "read" column misses files agents read with shell commands and is not usable yet.
+- Harness bug found and fixed: from round 2 the workspace is a copy Claude Code has not trusted, so it ignored the permissions file and blocked BMAD's own launcher (8 s rounds) and some of plain Claude Code's commands; permissions now go on flags and those rounds were run again (old results in `roadmap-ext/stale/`).
+- `roadmap-self-2` (with the reviewer fix): fast and fast-arch 5/5 both reps, follow-up rounds 2.0-2.7M tokens and 3-4 min (from 3.3-4.4M and 5-7 min).
+
 ## Latest changes (2026-10-15, five changes in a row: fast vs fast-arch)
 **Experiment `roadmap-self`:** XL-06 (build the cafe pricing engine) then XL-07 cash, XL-08 tax, XL-09 promotions and XL-10 stacking, each change made by the same arm on the code it left (`--handoff-self`); 2 reps per arm, Haiku (Architect on Sonnet). Hidden tests of a round include every earlier round's, so a broken old behaviour shows as a regression. Report: `bench/results/roadmap-self/REPORT.md`, `npx tsx bench/runner/loop-report.ts roadmap-self`.
 

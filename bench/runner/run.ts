@@ -11,6 +11,7 @@ import { RunManager } from '../../src/orchestrator/RunManager';
 import { cancelRun, getBus } from '../../src/orchestrator/runtime';
 import { runSingle } from '../../src/orchestrator/single';
 import { guidePath } from '../../src/pipeline/schema';
+import { runExternal, type ExternalArm } from './external';
 
 interface Task {
   id: string; size: string; title: string; timeLimitMinutes: number; gradeCommand: string; regressionCommand?: string;
@@ -29,13 +30,13 @@ interface Task {
    */
   handoffArm?: string;
 }
-interface Arm {
+type Arm = ExternalArm | {
   id: string; mode: 'single' | 'pipeline'; process?: boolean; profile: string;
   /** Approved pipeline id (default standard). */
   pipeline?: string;
   /** Single arms only: role guides (pipelines/roles/<name>.md) given to the one agent. */
   guides?: string[];
-}
+};
 
 const BENCH = join(STUDIO_ROOT, 'bench');
 const USAGE = `Usage: npm run bench -- --tasks <id,...|all> --arms <id,...> [--reps N] [--profile name] [--suite name]
@@ -251,7 +252,10 @@ for (const [i, { task, arm, rep }] of matrix.entries()) {
     });
 
     let status: string;
-    if (runner.mode === 'pipeline') {
+    if (runner.mode === 'external') {
+      runId = `${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${Math.random().toString(16).slice(2, 8)}`;
+      status = await runExternal(runner, { requirement, seed, runId, label, timeLimitMs: task.timeLimitMinutes * 60_000 });
+    } else if (runner.mode === 'pipeline') {
       runId = runs.start({ requirement, source: seed, profile, autoApprove: true, label, pipeline: runner.pipeline });
       status = await Promise.race([runs.waitFor(runId), deadline]);
     } else {
