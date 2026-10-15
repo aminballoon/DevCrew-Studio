@@ -104,7 +104,7 @@ Rules:
 - Cover edge cases and error paths, not only the happy path. Name each test after the AC it checks${requirement ? ' and the requirement clause (R-n)' : ''}.
 - Do not use skip, todo or only.
 - The suite will be run with: ${plan.testCommand}
-- Keep the suite lean: it is run on every attempt and maintained by every later change. Aim for about one test per acceptance criterion, and add boundary, hostile-input or concurrency cases only where a clause states a limit, an error or a security property. Prefer one test with several related assertions over many tiny tests, and reuse the helpers already in tests/.
+- Keep the suite lean: it is run on every attempt and maintained by every later change. Aim for about one test per acceptance criterion, and add boundary, hostile-input or concurrency cases only where a clause states a limit, an error or a security property. Assert every exact example the requirement gives (an input and its output). Prefer one test with several related assertions over many tiny tests, and reuse the helpers already in tests/.
 - When tests/ already has tests, they cover what the project does today. Write tests only for what this change adds or changes, and update the existing tests this change makes wrong. Do not rewrite or duplicate the others.
 - Every test must agree with the requirement and with every other test.
 ${QA_SCOPE}
@@ -188,7 +188,7 @@ Do this:
 
 Rules:
 - Only write under acceptance/ and ${ACCEPTANCE_RUN}. There is no code yet: check your tests only for syntax, do not wait for an implementation.
-- Keep the suite lean: about one test per clause, more only where a clause states a limit, an error or a security property.
+- Keep the suite lean: about one test per clause, more only where a clause states a limit, an error or a security property. A test asserts every exact example its clause gives (an input and its output): an example left out is a mistake nothing catches.
 - Every test must agree with the requirement and with every other test.
 ${roleGuide(guide)}
 End with the list of test files and the clauses each covers.`;
