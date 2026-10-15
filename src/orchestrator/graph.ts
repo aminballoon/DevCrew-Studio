@@ -457,6 +457,8 @@ const fastWork = (def: PipelineDef) => node('qa', async s => {
   const copy = join(runDir(s.runId), 'qa-workspace');
   rmSync(copy, { recursive: true, force: true });
   cpSync(ws, copy, { recursive: true, filter: src => !NOT_AUTHORED.some(d => src.slice(ws.length).split(/[/\\]/).includes(d)) });
+  // Hidden tests of earlier changes stay hidden: QA keeps them in its copy, the Builder never has them
+  hideAcceptance(s);
 
   const architecture = architectureFiles(ws);
   const builder: TurnContext = { ...ctx(s, 'dev', { from: ['You: the requirement', ...(architecture.length ? ['Architect: the architecture'] : [])], reads: [], to: ['Verify'] }), scope: builderScope(ws) };

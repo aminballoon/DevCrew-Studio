@@ -183,7 +183,8 @@ Do this:
 1. Look at the existing files to learn the language, the test tool and any code there already.
 2. Write acceptance tests under acceptance/ (for example acceptance/main.test.ts) that check every clause, using exactly the names, paths and signatures the requirement gives. Import the code from where the requirement or the existing project says it lives. Where the requirement leaves a name open, test only behaviour you can reach through the names it does give.
 3. Name each test after the clause and the behaviour (R-n: what must happen), and give assertions clear messages: a failing name and message is all the Builder will see.
-4. Write ${runFile(ACCEPTANCE_RUN, 'only the acceptance tests')}
+4. Write ${runFile(ACCEPTANCE_RUN, 'every test under acceptance/ (and nothing else)')}
+   When acceptance/ already has tests, they check what the project does today: keep them, update the ones this change makes wrong, and add tests for what it adds. The command runs them all, so a change that breaks earlier behaviour fails.
 
 Rules:
 - Only write under acceptance/ and ${ACCEPTANCE_RUN}. There is no code yet: check your tests only for syntax, do not wait for an implementation.
