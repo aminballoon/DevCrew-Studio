@@ -1,0 +1,20 @@
+{
+  "id": "multi-fast-arch-mut",
+  "code": "FAM",
+  "name": "AI team · fast with an architecture and a mutation check",
+  "summary": "The fast team inside a lasting architecture: an Architect (a stronger model) designs the modules, their dependency rules and contracts once; the Builder builds inside them, and the system rejects imports that break the rules. Once the tests pass, the system makes small mistakes in the code on purpose and QA adds hidden tests for the ones its suite missed.",
+  "agents": 4,
+  "steps": [
+    "Architect designs modules, rules and contracts (only when the project has none)",
+    "Builder plans and codes, QA writes hidden tests (at the same time)",
+    "System runs both test sets and checks the imports → Builder fixes if failing (max 5 rounds)",
+    "Mutation check: missed mistakes go to QA, its new tests run on the code → Builder fixes",
+    "Reviewer checks the diff"
+  ],
+  "role": "candidate",
+  "color": "#a855f7",
+  "mode": "pipeline",
+  "pipeline": "fast-arch",
+  "profile": "claude",
+  "mutation": true
+}
