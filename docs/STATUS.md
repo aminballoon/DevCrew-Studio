@@ -15,6 +15,16 @@
   - The check costs QA about 120k tokens a run and 13-34 s of test runs. Lower total tokens on the mutation arm come from the Reviewer (630k vs 392k a run, range 0.25-1.3M), not from the check.
   - QA used survivors well: S-01 added 3 tests that killed all 3; L-02 skipped both (no clause sets a key format or the first transaction number); L-03 added 2 boundary tests and skipped 4 no clause decides. What survives after is mostly equivalent mutants.
   - No added test failed on the code: the fast team already resolves every one of these tasks (every multi-fast cell in bench history is at 100%), so this set can show stronger hidden tests and their cost, not more tasks resolved. That needs tasks where hidden tests miss bugs (fast-arch's JPY miss in roadmap-self is one).
+- **Roadmap `roadmap-mut`** (XL-06 to XL-10, `--handoff-self`, 2 reps, Haiku, Architect on Sonnet; arms `multi-fast-arch` and `multi-fast-arch-mut`):
+
+  | Arm | Hidden (5 rounds x 2) | Resolved | Regressions | Tokens/round | $/round | Min/round | QA tokens/round |
+  |---|---|---|---|---|---|---|---|
+  | fast-arch | 184/184 | 10/10 | 0 | 2.32M | 0.20 | 5.8 | 455k |
+  | fast-arch + mutation | 180/184 | 6/10 | 0 | 2.27M | 0.16 | 5.9 | 684k |
+
+  - **The JPY bug came back and the mutation check did not catch it.** Rep 2's XL-07 build left `JPY: "¥"` out of the symbol table, so `formatMoney(1235, "JPY")` printed `JPY 1,235`; the one hidden test failed in every later round (the 4 misses). QA asserted the exact THB, USD and KWD examples but checked JPY only with a loose regex. This is missing code, not wrong code: there is no line to mutate, so mutation testing cannot see it. It happened before the check ran and is not caused by it (the plain arm got the same code right this time; roadmap-self had the same miss on fast-arch).
+  - Mutation scores were lowest on the biggest rounds (XL-06 67-77%, XL-10 63-76%) and rose to 75-83% after QA; no added test ever failed on the code. The check costs QA ~230k tokens a round and 7-29 s.
+  - So the mutation check strengthens tests against wrong code, but the bug this project actually hit twice is an exact example QA left out. A non-AI check that every literal example in the requirement appears in the hidden tests would have caught both.
 - **Bug found and fixed:** QA settled a dispute by fixing its own test and answered `REQUIREMENT_ISSUE: none.`; any text after the marker counted as a conflict, so the run escalated and, unattended, failed with correct code (L-01, graded 33/33). An empty answer is no conflict now (`b78e65f`); that cell is in `mut-1/stale/`.
 - **Flaky test fixed:** the fake agent's first QA and Builder turns wait for each other, so "both turns began before either finished" no longer fails under load.
 - **Handoffs measured** (mut-1 event logs): what DevCrew hands a role is small. The Builder gets ~2.1k tokens a run and reads 517k, QA ~2.3k of 373k (under 1%); the rest is each agent re-reading its own session on every model call (16-26 calls at 16-26k context each), as SWE-Marathon found (99.5% of input is replay). The Reviewer was the exception: 17.5k tokens pasted, 59% of the diff being QA's hidden tests (src/ 21%, the Builder's tests 18%), which it is told not to review.
