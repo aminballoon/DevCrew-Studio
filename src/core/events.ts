@@ -41,6 +41,13 @@ export type DevcrewEventBody =
   | ({ type: 'usage'; role: Role; agent: string; contextUsed?: number; contextSize?: number; modelCalls?: number; thoughtChars?: number } & UsageNumbers)
   | { type: 'guard_violation'; role: Role; files: string[]; action: 'reverted' | 'rejected' }
   | { type: 'verify_result'; module: string; attempt: number; passed: boolean; tests: TestCounts; reasons: string[]; output: string; commands?: string[] }
+  | {
+    type: 'mutation_result'; check: number; candidates: number; tested: number; killed: number; notRun: number; ms: number;
+    /** Killed share of tested mutants, 0-100; null when none ran. */
+    score: number | null;
+    survived: { file: string; line: number; operator: string; before: string; after: string }[];
+    skipped?: string;
+  }
   | { type: 'gate_waiting'; gate: GateId; payload: Record<string, unknown> }
   | { type: 'gate_resolved'; gate: GateId; decision: string; feedback?: string }
   | { type: 'run_finished'; status: 'approved' | 'aborted' | 'failed' | 'completed'; error?: string }

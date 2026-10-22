@@ -60,11 +60,26 @@ Steps run top to bottom. Four types exist.
 | type | id | How many | What it does |
 |---|---|---|---|
 | `qa` | `qa` | exactly 1, `"blind": true` | Writes hidden acceptance tests while the Builder works. |
-| `build` | `build` | exactly 1, right after `qa` | The Builder plans, codes and tests; Verify (the system, not AI) judges each try. Optional `"maxAttempts"` (1–10), then a human decides. |
+| `build` | `build` | exactly 1, right after `qa` | The Builder plans, codes and tests; Verify (the system, not AI) judges each try. Optional `"maxAttempts"` (1–10), then a human decides. Optional `"mutation"`: see [Mutation check](#mutation-check). |
 | `gate` | your choice | any | You review. See below. |
 | `agent` | your choice | any | An extra AI role: research before `qa`, reviewers and writers after `build`. See below. |
 
-Reserved ids: `setup`, `finish`, `dev`, `verify`, `escalate`, `single`.
+Reserved ids: `setup`, `finish`, `dev`, `verify`, `escalate`, `single`, `dispute`, `mutation`, `strengthen`.
+
+### Mutation check
+
+```json
+{ "type": "build", "id": "build", "mutation": { "maxMutants": 30, "rounds": 1, "budgetMinutes": 10 } }
+```
+
+Once Verify passes, the system changes the lines this run wrote in one small way at a time (`>=`
+to `>`, `+` to `-`, `&&` to `||`, `floor` to `ceil`, a number plus one, a `!` dropped) and runs QA's
+hidden tests on each change. A change they still pass is a mistake they would not catch. Those go
+to QA (`rounds` times), which adds tests where the requirement decides the behaviour; the new
+tests then run on the real code, so a bug the first suite missed goes back to the Builder like any
+failing hidden test. One more check after the last round only measures. All fields are optional
+(`{}` uses the defaults above). Turn it on for one run with the **Mutation check** box, `--mutation`
+on the CLI, or `"mutation": true` in a bench arm.
 
 ### Gate
 

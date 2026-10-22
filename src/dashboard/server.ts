@@ -108,6 +108,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       label: typeof body.label === 'string' ? body.label : undefined,
       pipeline: typeof body.pipeline === 'string' && body.pipeline ? body.pipeline : undefined,
       addons: Array.isArray(body.addons) ? body.addons.filter((x: unknown): x is string => typeof x === 'string') : undefined,
+      mutation: body.mutation === true,
       });
     } catch (e) {
       return json(res, 400, { error: (e as Error).message });

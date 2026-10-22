@@ -6,13 +6,14 @@ import { Annotation, END, interrupt, START, StateGraph } from '@langchain/langgr
 import { runDir } from '../core/config';
 import { ROLE_SCOPES } from '../core/scope';
 import { usageByRole, type GateId } from '../core/events';
-import { entryNode, loadPipeline, SYSTEM_DIAGRAM, type AgentStep, type GateStep, type PipelineDef, type Step } from '../pipeline/schema';
+import { entryNode, loadPipeline, MUTATION_DEFAULTS, SYSTEM_DIAGRAM, type AgentStep, type GateStep, type MutationOptions, type PipelineDef, type Step } from '../pipeline/schema';
 import { ARCHITECTURE_DOC, ARCHITECTURE_FILE, checkArchitecture, readArchitecture } from '../guard/architecture';
 import { NOT_AUTHORED, takeSnapshot } from '../guard/snapshot';
+import { addedLines, mutationScore, restorePending, runMutationCheck, type Mutant } from '../guard/mutation';
 import { captureBaseline, countDeclaredTests, verify, type TestBaseline, type VerifyResult } from '../guard/verify';
 import { commitAll, diffSince, prepareWorkspace, type Workspace } from '../guard/workspace';
 import { readTestRun, readText, type TestRun } from './testRun';
-import { ACCEPTANCE_RUN, agentStepPrompt, filesBlock, BUILDER_TESTS, builderFixPrompt, builderPrompt, fastQaPrompt, qaDisputePrompt } from './prompts';
+import { ACCEPTANCE_RUN, agentStepPrompt, filesBlock, BUILDER_TESTS, builderFixPrompt, builderPrompt, fastQaPrompt, qaDisputePrompt, qaMutantsPrompt } from './prompts';
 import { requirementClauses } from './requirement';
 import { collectReports } from './reports';
 import { readSystem } from './system';
@@ -60,6 +61,11 @@ export const PipelineState = Annotation.Root({
   archChange: last<string | null>(() => null),
   /** How many times the Architect changed the design for the Builder in this run. */
   archChanges: last<number>(() => 0),
+  /** Mutation checks run so far, and how many times QA strengthened its tests after one. */
+  mutationChecks: last<number>(() => 0),
+  strengthened: last<number>(() => 0),
+  /** Mutants the hidden tests did not catch in the last check, for QA. */
+  mutants: last<Mutant[]>(() => []),
   /** Report text of each step with a verdict, by step id. */
   reviews: last<Record<string, string>>(() => ({})),
   /** How many times each step has sent the work back to Dev. */
@@ -382,6 +388,66 @@ const fastVerify = node('verify', async s => {
   return { lastVerify: result, allModulesDone: result.passed, feedback: null, specIssue: repeatedHiddenFailure(s, result) };
 }, s => ({ module: MAIN.id, attempt: s.attempt }));
 
+// --- Mutation check: does QA's hidden suite notice small mistakes in the code? ---
+
+/** The build step's mutation settings, or null when the check is off. */
+const mutationOf = (def: PipelineDef): Required<MutationOptions> | null => {
+  const build = def.steps.find(x => x.type === 'build');
+  return build?.type === 'build' && build.mutation ? { ...MUTATION_DEFAULTS, ...build.mutation } : null;
+};
+
+/**
+ * After Verify passes: mutate the lines this run changed, one at a time, and run the hidden tests
+ * on each. Mutants they still pass go to QA, up to `rounds` times; the check after the last
+ * round only measures. Runs with the hidden tests in place and puts every file back after.
+ */
+const mutationCheck = (def: PipelineDef) => node('mutation', async s => {
+  const opts = mutationOf(def)!;
+  const ws = s.workspace!.path;
+  const journal = join(runDir(s.runId), 'mutation-restore.json');
+  showAcceptance(s);
+  let result;
+  try {
+    result = await runMutationCheck({
+      workspace: ws,
+      lines: addedLines(diffSince(s.workspace!).patch),
+      testCommand: s.acceptanceRun!.testCommand,
+      testFormats: s.acceptanceRun!.testFormats,
+      expectedTests: countDeclaredTests(ws, `${ACCEPTANCE}/`),
+      maxMutants: opts.maxMutants,
+      budgetMs: opts.budgetMinutes * 60_000,
+      journal,
+      cancelled: () => isCancelled(s.runId),
+    });
+  } finally {
+    restorePending(journal, ws);
+    hideAcceptance(s);
+  }
+  const check = s.mutationChecks + 1;
+  const { survived, ...counts } = result;
+  getBus().emit(s.runId, {
+    type: 'mutation_result', check, ...counts, score: mutationScore(result),
+    survived: survived.map(({ file, line, operator, before, after }) => ({ file, line, operator, before, after })),
+  });
+  return { mutationChecks: check, mutants: s.strengthened < opts.rounds ? survived : [] };
+});
+
+/** QA adds hidden tests for the mutants that survived; Verify then runs them on the real code. */
+const strengthenTests = node('qa', async s => {
+  const io = { from: ['Mutation check: code changes the hidden tests did not notice'], reads: [`${ACCEPTANCE}/`], to: ['Verify'] };
+  showAcceptance(s);
+  try {
+    const turn = await agentTurn({ ...ctx(s, 'qa', io), scope: { write: [`${ACCEPTANCE}/`], deny: [] } },
+      qaMutantsPrompt(s.mutants, s.requirement, requirementClauses(s.requirement), s.acceptanceRun!.testCommand));
+    const answer = turn.text.match(/^QA_ANSWER:\s*(.+)$/m)?.[1];
+    if (answer) { getBus().emit(s.runId, { type: 'log', level: 'info', message: `QA after the mutation check: ${answer.slice(0, 300)}` }); }
+  } finally {
+    hideAcceptance(s);
+  }
+  // New hidden tests that fail on the real code go to the Builder with a full set of attempts
+  return { strengthened: s.strengthened + 1, mutants: [], attempt: 0, lastVerify: null, feedback: null, specIssue: null };
+}, () => ({ module: 'mutants' }));
+
 const escalate = async (s: S): Promise<U> => {
   // Unattended (benchmark) runs have nobody to escalate to: out of attempts means failed
   const archChange = s.archChange ? `The Builder says the requirement does not fit the architecture: ${s.archChange}` : null;
@@ -585,6 +651,7 @@ export function buildGraph(def: PipelineDef = loadPipeline('fast')) {
   if (isFast(def)) {
     // QA and the Builder start together (one node); Verify judges with both; failures go back to the Builder
     const after = nextNode('build');
+    const mutation = mutationOf(def);
     // The Architect (and your approval of its design) only runs while the project has no architecture
     const architect = architectOf(def);
     // Research roles run first; then the Architect, only while the project has no architecture
@@ -595,10 +662,16 @@ export function buildGraph(def: PipelineDef = loadPipeline('fast')) {
       .addNode('qa', fastWork(def)).addConditionalEdges('qa', (s: S) => (s.archChange ? (s.revisedTo ?? 'escalate') : 'verify'), ['verify', 'escalate', ...(architect ? [architect] : [])])
       .addNode('dev', fastDev(def)).addNode('verify', fastVerify).addNode('dispute', qaDispute).addNode('escalate', escalate)
       .addConditionalEdges('dev', (s: S) => (s.archChange ? (s.revisedTo ?? 'escalate') : !s.specIssue ? 'verify' : s.disputes < MAX_DISPUTES ? 'dispute' : 'escalate'), ['verify', 'dispute', 'escalate', ...(architect ? [architect] : [])])
-      .addConditionalEdges('verify', (s: S) => (s.allModulesDone ? after : s.specIssue ? 'dispute' : s.attempt >= maxAttempts ? 'escalate' : 'dev'), [...new Set([after, 'dev', 'dispute', 'escalate'])])
+      .addConditionalEdges('verify', (s: S) => (s.allModulesDone ? (mutation && s.mutationChecks <= s.strengthened ? 'mutation' : after) : s.specIssue ? 'dispute' : s.attempt >= maxAttempts ? 'escalate' : 'dev'),
+        [...new Set([after, 'dev', 'dispute', 'escalate', ...(mutation ? ['mutation'] : [])])])
       // QA found a conflict in the requirement itself: a person decides
       .addConditionalEdges('dispute', (s: S) => (s.specIssue ? 'escalate' : 'dev'), ['dev', 'escalate'])
       .addConditionalEdges('escalate', (s: S) => (s.decision === 'retry' ? 'dev' : 'finish'), ['dev', 'finish']);
+    if (mutation) {
+      g.addNode('mutation', mutationCheck(def)).addNode('strengthen', strengthenTests)
+        .addConditionalEdges('mutation', (s: S) => (s.mutants.length ? 'strengthen' : after), [...new Set([after, 'strengthen'])])
+        .addEdge('strengthen', 'verify');
+    }
   }
 
   for (const step of steps) {

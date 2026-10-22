@@ -30,6 +30,8 @@ function minutesByRole(ev: DevcrewEvent[]): Record<string, number> {
     if (e.type === 'usage') { close(e.role, e.ts); }
     if (e.type === 'node_started' && e.node === 'verify') { open.verify = e.ts; }
     if (e.type === 'verify_result') { close('verify', e.ts); }
+    if (e.type === 'node_started' && e.node === 'mutation') { open.mutation = e.ts; }
+    if (e.type === 'mutation_result') { close('mutation', e.ts); }
   }
   return out;
 }
@@ -51,8 +53,16 @@ function problems(ev: DevcrewEvent[]): string[] {
   const out: string[] = [];
   const failedVerifies = n(e => e.type === 'verify_result' && !e.passed);
   if (failedVerifies) { out.push(`${failedVerifies} failed verify`); }
-  const disputes = n(e => e.type === 'node_started' && e.node === 'qa' && !!e.module);
+  const disputes = n(e => e.type === 'node_started' && e.node === 'qa' && !!e.module && e.module !== 'mutants');
   if (disputes) { out.push(`${disputes} disputes`); }
+  for (const e of ev) {
+    if (e.type === 'mutation_result') { out.push(`mutation check ${e.check}: ${e.skipped ?? `${e.killed}/${e.tested} caught (${e.score}%), ${e.survived.length} missed, ${Math.round(e.ms / 1000)}s`}`); }
+  }
+  const strengthened = ev.findIndex(e => e.type === 'node_started' && e.node === 'qa' && e.module === 'mutants');
+  if (strengthened >= 0) {
+    const caught = ev.slice(strengthened).filter(e => e.type === 'verify_result' && !e.passed).length;
+    out.push(caught ? `QA's added tests failed on the code ${caught} time(s): a bug the first tests missed` : "QA's added tests passed on the code");
+  }
   const replans = n(e => e.type === 'node_started' && e.node === 'planner') - 1;
   if (replans > 0) { out.push(`${replans} replans`); }
   const fresh = n(e => e.type === 'log' && /starting a fresh session/.test(e.message));
@@ -84,7 +94,7 @@ for (const suite of process.argv.slice(2)) {
     const mins = minutesByRole(ev);
     const calls = callsByRole(ev);
     const roles = Object.entries(r.tokens.byRole ?? {}).map(([k, v]) => `${k} ${m(v)}/${(mins[k] ?? 0).toFixed(1)}m${calls[k] ? ` ${calls[k].calls} calls, ${m(calls[k].thought)} thought chars` : ''}`).join(', ');
-    console.log(`- ${r.task} ${r.arm} #${r.rep} [${r.runId}] ${r.resolved ? 'RESOLVED' : r.status} ${r.hidden.pass}/${r.hidden.total} · ${m(r.tokens.total)} · ${(r.wallMs / 60_000).toFixed(1)}m${mins.verify ? ` · verify ${mins.verify.toFixed(1)}m` : ''}`);
+    console.log(`- ${r.task} ${r.arm} #${r.rep} [${r.runId}] ${r.resolved ? 'RESOLVED' : r.status} ${r.hidden.pass}/${r.hidden.total} · ${m(r.tokens.total)} · ${(r.wallMs / 60_000).toFixed(1)}m${mins.verify ? ` · verify ${mins.verify.toFixed(1)}m` : ''}${mins.mutation ? ` · mutation ${mins.mutation.toFixed(1)}m` : ''}`);
     if (roles) { console.log(`    ${roles}`); }
     for (const p of problems(ev)) { console.log(`    ${p}`); }
   }

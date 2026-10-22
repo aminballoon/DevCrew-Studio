@@ -34,7 +34,7 @@ npm run dashboard
 | คำสั่ง | ใช้ทำอะไร |
 |---|---|
 | `npm run dashboard` | Dashboard: pipeline สด, Gate, ฟีดกิจกรรม, token ต่อบทบาท, ผล benchmark |
-| `npm run run -- start --requirement <file> [--source <dir>] [--profile fake] [--pipeline single\|fast\|fast-arch] [--addons security,docs] [--auto]` | เริ่ม run จาก CLI |
+| `npm run run -- start --requirement <file> [--source <dir>] [--profile fake] [--pipeline single\|fast\|fast-arch] [--addons security,docs] [--mutation] [--auto]` | เริ่ม run จาก CLI |
 | `npm run run -- gate <runId> approve` | ตอบ Gate จาก CLI |
 | `npm run bench -- --tasks S-01-cart --arms single-vanilla,multi-fast,ext-claude-cli --reps 2` | รัน benchmark |
 | `npm run pipeline -- validate <file>` / `list` / `status <id>` / `approve <id>` | Check, list and approve pipeline files (see [pipelines/SCHEMA.md](pipelines/SCHEMA.md)) |

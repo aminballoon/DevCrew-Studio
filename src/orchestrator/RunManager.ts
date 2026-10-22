@@ -7,7 +7,7 @@ import { SqliteSaver } from '@langchain/langgraph-checkpoint-sqlite';
 import { DATA_ROOT, runDir } from '../core/config';
 import { gateDecisions, notifyGate } from '../core/notify';
 import { usageByRole, type DevcrewEvent, type GateId } from '../core/events';
-import { composePipeline, loadPipeline, validatePipeline, withGuides, type PipelineDef } from '../pipeline/schema';
+import { composePipeline, loadPipeline, validatePipeline, withGuides, withMutation, type PipelineDef } from '../pipeline/schema';
 import { buildGraph, type GateAnswer } from './graph';
 import { checkCapabilities, closeSessions, getBus, getConfig } from './runtime';
 import { runSingle } from './single';
@@ -22,6 +22,8 @@ export interface StartOptions {
   pipeline?: string | PipelineDef;
   /** Add-on steps from pipelines/addons/, attached to a fast pipeline. */
   addons?: string[];
+  /** Turn on the mutation check (QA strengthens its hidden tests where mutants survive). */
+  mutation?: boolean;
 }
 
 export interface RunSummary {
@@ -113,7 +115,8 @@ export class RunManager {
     }
     // A run keeps the guide texts it started with, so editing a guide never changes a running pipeline
     const base = typeof opts.pipeline === 'object' ? checked(opts.pipeline) : loadPipeline(opts.pipeline ?? 'fast');
-    const def = withGuides(composePipeline(base, opts.addons ?? []));
+    const composed = composePipeline(base, opts.addons ?? []);
+    const def = withGuides(opts.mutation ? withMutation(composed) : composed);
     const { errors, warnings } = checkCapabilities(getConfig(), profile, def);
     if (errors.length) { throw new Error(`This profile cannot run the "${def.id}" pipeline:\n- ${errors.join('\n- ')}`); }
     const runId = `${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${randomUUID().slice(0, 6)}`;

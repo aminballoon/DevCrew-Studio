@@ -61,6 +61,7 @@ const STAGES = {
   gate_merge: { name: 'Approve the merge', gate: 'code' },
   finish: { name: 'Done' },
   single: { name: 'Single AI', color: 'single' },
+  mutation: { name: 'Mutation check', color: 'system' },
 };
 const GATE_NODE = { merge: 'gate_merge', escalation: 'escalate' };
 
@@ -198,7 +199,8 @@ function nowSentence(m) {
   if (!a) return ['run', 'Starting…'];
   const text = {
     start: 'Preparing the workspace',
-    qa: a.module ? 'QA is checking a hidden test the Builder disputes' : 'QA is writing hidden tests while the Builder builds',
+    qa: a.module === 'mutants' ? 'QA is adding hidden tests for the mistakes they missed' : a.module ? 'QA is checking a hidden test the Builder disputes' : 'QA is writing hidden tests while the Builder builds',
+    mutation: 'The system is making small mistakes in the code to see if the hidden tests notice',
     dev: `The Builder is working (attempt ${a.attempt ?? 1})`,
     verify: "The system is running the Builder's tests and QA's hidden ones",
     reviewer: 'Reviewer is checking the code',
@@ -240,7 +242,10 @@ function pipelineLayout(def) {
   let gateNo = 0;
   for (const s of def.steps) {
     if (s.type === 'qa') nodes.push({ id: 'qa', label: 'QA', role: 'HIDDEN TESTS', agentRole: 'qa' });
-    else if (s.type === 'build') nodes.push({ id: 'dev', label: 'Builder', role: 'SAME TIME AS QA', agentRole: 'dev' }, { id: 'verify', label: 'Verify', role: 'NO AI · JUDGE' });
+    else if (s.type === 'build') {
+      nodes.push({ id: 'dev', label: 'Builder', role: 'SAME TIME AS QA', agentRole: 'dev' }, { id: 'verify', label: 'Verify', role: 'NO AI · JUDGE' });
+      if (s.mutation) nodes.push({ id: 'mutation', label: 'Mutation', role: 'NO AI · CHECKS QA' });
+    }
     else if (s.type === 'gate') nodes.push({ id: s.id, label: `Gate ${++gateNo}`, gate: true, sub: { code: 'Code', design: 'Design', architecture: 'Architecture' }[s.review] });
     else nodes.push({
       id: s.id, label: s.name.length > 15 ? `${s.name.slice(0, 14)}…` : s.name, agentRole: s.id,
@@ -265,6 +270,11 @@ function pipelineLayout(def) {
     // A hidden test the Builder disputes, or that failed twice, goes to QA to check
     ['verify', 'qa', 'back', 'check test', arcAbove(-22, 20)],
     ['dev', 'qa', 'back', 'dispute', (a, b) => [{ x: a.x - 20, y: bottom(a).y }, { x: (a.x + b.x) / 2, y: 200 }, { x: b.x + 20, y: bottom(b).y }]],
+    ...(nodes.some(n => n.id === 'mutation') ? [
+      // Mistakes the hidden tests missed go to QA; its new tests are judged by Verify
+      ['mutation', 'qa', 'back', 'missed', arcAbove(0, 10)],
+      ['qa', 'verify', 'back', 'new tests', (a, b) => [{ x: a.x + 10, y: bottom(a).y }, { x: (a.x + b.x) / 2, y: 215 }, { x: b.x - 10, y: bottom(b).y }]],
+    ] : []),
     ['verify', 'escalate', 'back', '', (a, b) => [{ x: a.x + 10, y: bottom(a).y }, { x: a.x + 10, y: b.y }, right(b)]],
     ['escalate', 'dev', 'back', 'retry', (a, b) => [left(a), { x: b.x - 10, y: a.y }, { x: b.x - 10, y: bottom(b).y }]],
   );
@@ -732,7 +742,8 @@ function reasonText(r) {
 function stepTitle(s) {
   switch (s.node) {
     case 'start': return 'Run started';
-    case 'qa': return s.module ? 'QA checks a hidden test the Builder disputes' : 'QA writes hidden tests while the Builder builds';
+    case 'qa': return s.module === 'mutants' ? 'QA adds hidden tests for the mistakes they missed' : s.module ? 'QA checks a hidden test the Builder disputes' : 'QA writes hidden tests while the Builder builds';
+    case 'mutation': return 'System makes small mistakes in the code to test the hidden tests';
     case 'dev': return `Builder works · attempt ${s.attempt ?? 1}`;
     case 'verify': return "System runs the Builder's tests and the hidden ones";
     case 'reviewer': return 'Reviewer checks the code';
@@ -750,6 +761,8 @@ function stepTitle(s) {
 function stepOutcome(s) {
   if (s.verify) return `<span class="chip ${s.verify.passed ? 'ok' : 'bad'}">${s.verify.passed ? 'Passed' : 'Failed'} ${s.verify.tests.pass}/${s.verify.tests.total}</span>`;
   if (s.gate) return s.waiting ? '<span class="chip warn">Waiting for you</span>' : `<span class="chip ${s.decision === 'approve' ? 'ok' : s.decision === 'abort' ? 'bad' : 'warn'}">${s.auto && s.decision === 'approve' ? 'Auto-approved' : DECISION[s.decision] ?? s.decision}</span>`;
+  const mutation = s.events.find(e => e.type === 'mutation_result');
+  if (mutation) return mutation.skipped ? '<span class="chip">Skipped</span>' : `<span class="chip ${mutation.survived.length ? 'warn' : 'ok'}">${mutation.score}% caught</span>`;
   if (s.node === 'finish') return `<span class="chip ${['approved', 'completed'].includes(s.status) ? 'ok' : 'bad'}">${{ approved: 'Done', completed: 'Finished', failed: 'Failed', aborted: 'Cancelled' }[s.status] ?? s.status}</span>`;
   if (s.guards) return `<span class="chip warn">${plural(s.guards, 'file')} blocked</span>`;
   return '';
@@ -793,7 +806,13 @@ function stepLines(s) {
         line(e.passed ? 'pass' : 'fail', `${e.passed ? `All ${e.tests.total} tests passed` : `${e.reasons.map(reasonText).map(esc).join(' · ')}<br><span class="muted">The result goes back to be fixed.</span>`}
           <details><summary>Full test output</summary><pre>${esc(e.output.slice(-4000))}</pre></details>`, e.passed ? 'okline' : 'badline');
         break;
+      case 'mutation_result':
+        if (e.skipped) { line('skipped', esc(e.skipped), 'muted'); break; }
+        line(e.survived.length ? 'missed' : 'pass', `The hidden tests caught ${e.killed} of ${e.tested} small mistakes made on purpose (${e.score}%)${e.notRun ? `; ${e.notRun} more were not tried in the time limit` : ''}.${e.survived.length ? `<br><span class="muted">They missed these:</span>
+          <details><summary>${e.survived.length} missed</summary><pre>${esc(e.survived.map(m => `${m.file}:${m.line}\n  - ${m.before}\n  + ${m.after}`).join('\n'))}</pre></details>` : ''}`, e.survived.length ? 'warnline' : 'okline');
+        break;
       case 'log':
+        if (e.level === 'info' && e.message.startsWith('QA after the mutation check')) { line('says', esc(e.message), 'say'); break; }
         if (e.level === 'error') line('error', `Something went wrong<details><summary>Details</summary><pre>${esc(e.message)}</pre></details>`, 'badline');
         break;
       case 'run_finished':
@@ -1500,7 +1519,7 @@ async function boot() {
     if (e.submitter?.value !== 'start') return;
     const f = new FormData(e.target);
     const r = await fetch('/api/runs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
-      requirement: f.get('requirement'), label: f.get('label'), source: f.get('source'), profile: f.get('profile'), pipeline: f.get('pipeline'), addons: $('#addons').hidden ? [] : f.getAll('addons'), autoApprove: f.get('autoApprove') === 'on',
+      requirement: f.get('requirement'), label: f.get('label'), source: f.get('source'), profile: f.get('profile'), pipeline: f.get('pipeline'), addons: $('#addons').hidden ? [] : f.getAll('addons'), mutation: !$('#addons').hidden && f.get('mutation') === 'on', autoApprove: f.get('autoApprove') === 'on',
     }) });
     const out = await r.json();
     if (!r.ok) { e.preventDefault(); $('#start-error').textContent = out.error; return; }

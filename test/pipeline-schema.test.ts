@@ -4,7 +4,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { STUDIO_ROOT } from '../src/core/config';
-import { composePipeline, guidesOf, loadPipeline, validatePipeline, withGuides, type AgentStep, type PipelineDef } from '../src/pipeline/schema';
+import { composePipeline, guidesOf, loadPipeline, validatePipeline, withGuides, withMutation, type AgentStep, type PipelineDef } from '../src/pipeline/schema';
 
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x));
 const fast = () => clone(loadPipeline('fast'));
@@ -178,4 +178,19 @@ test('a run is refused when a role needs something its agent cannot do', async (
   assert.deepEqual(checkCapabilities(cfg, 'mixed', def), { errors: [], warnings: [] });
   assert.match(checkCapabilities(cfg, 'other', def).warnings.join(), /does not say whether it can/);
   assert.deepEqual(checkCapabilities(cfg, 'fake', def).errors, []);
+});
+
+test('the mutation check is a build step setting: turned on per run, checked like the rest', () => {
+  const on = withMutation(fast());
+  assert.deepEqual(on.steps.find(s => s.type === 'build'), { type: 'build', id: 'build', mutation: {} });
+  assert.deepEqual(validatePipeline(on), []);
+  const kept = fast();
+  kept.steps = kept.steps.map(s => (s.type === 'build' ? { ...s, mutation: { maxMutants: 10 } } : s));
+  assert.deepEqual(withMutation(kept).steps.find(s => s.type === 'build'), { type: 'build', id: 'build', mutation: { maxMutants: 10 } });
+  const bad = fast();
+  bad.steps = bad.steps.map(s => (s.type === 'build' ? { ...s, mutation: { maxMutants: 0, rounds: 9, budgetMinutes: 1.5 } } : s));
+  assert.deepEqual(validatePipeline(bad).filter(e => e.includes('mutation')).length, 3);
+  assert.throws(() => withMutation(clone(loadPipeline('system-integration'))), /needs a fast pipeline/);
+  // Its graph nodes cannot be taken by a role
+  assert.ok(validatePipeline(afterBuild(fast(), agent('mutation'))).some(e => /reserved/.test(e)));
 });

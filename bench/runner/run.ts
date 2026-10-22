@@ -34,6 +34,8 @@ type Arm = ExternalArm | {
   id: string; mode: 'single' | 'pipeline'; process?: boolean; profile: string;
   /** Approved pipeline id (default standard). */
   pipeline?: string;
+  /** Pipeline arms only: run the mutation check after Verify passes. */
+  mutation?: boolean;
   /** Single arms only: role guides (pipelines/roles/<name>.md) given to the one agent. */
   guides?: string[];
 };
@@ -178,6 +180,18 @@ function metrics(events: DevcrewEvent[]) {
     fixIterations: events.filter(e => e.type === 'verify_result' && !e.passed).length,
     guardViolations: events.reduce((n, e) => n + (e.type === 'guard_violation' ? e.files.length : 0), 0),
     contextPeak,
+    mutation: mutationMetrics(events),
+  };
+}
+
+/** Each mutation check's score, and whether QA's added tests then failed on the Builder's code (a bug the first suite missed). */
+function mutationMetrics(events: DevcrewEvent[]) {
+  const checks = events.flatMap(e => (e.type === 'mutation_result' ? [e] : []));
+  if (!checks.length) { return undefined; }
+  const strengthened = events.findIndex(e => e.type === 'node_started' && e.node === 'qa' && e.module === 'mutants');
+  return {
+    checks: checks.map(c => ({ score: c.score, tested: c.tested, killed: c.killed, survived: c.survived.length, seconds: Math.round(c.ms / 1000), skipped: c.skipped })),
+    failedAfterStrengthening: strengthened < 0 ? 0 : events.slice(strengthened).filter(e => e.type === 'verify_result' && !e.passed).length,
   };
 }
 
@@ -256,7 +270,7 @@ for (const [i, { task, arm, rep }] of matrix.entries()) {
       runId = `${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${Math.random().toString(16).slice(2, 8)}`;
       status = await runExternal(runner, { requirement, seed, runId, label, timeLimitMs: task.timeLimitMinutes * 60_000 });
     } else if (runner.mode === 'pipeline') {
-      runId = runs.start({ requirement, source: seed, profile, autoApprove: true, label, pipeline: runner.pipeline });
+      runId = runs.start({ requirement, source: seed, profile, autoApprove: true, label, pipeline: runner.pipeline, mutation: runner.mutation });
       status = await Promise.race([runs.waitFor(runId), deadline]);
     } else {
       runId = `${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${Math.random().toString(16).slice(2, 8)}`;

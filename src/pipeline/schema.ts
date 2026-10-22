@@ -30,7 +30,23 @@ export interface BuildStep extends WithGuide {
   id: 'build';
   /** Builder attempts before asking a human (defaults to the config value). */
   maxAttempts?: number;
+  /**
+   * Mutation check after Verify passes: small changes to the Builder's code that QA's hidden
+   * tests still pass go back to QA to strengthen the tests (see src/guard/mutation.ts).
+   */
+  mutation?: MutationOptions;
 }
+
+export interface MutationOptions {
+  /** Mutants run per check (default 30). */
+  maxMutants?: number;
+  /** Times QA is asked to strengthen the tests (default 1); one more check measures the result. */
+  rounds?: number;
+  /** Time limit of one check, in minutes (default 10). */
+  budgetMinutes?: number;
+}
+
+export const MUTATION_DEFAULTS: Required<MutationOptions> = { maxMutants: 30, rounds: 1, budgetMinutes: 10 };
 
 export interface GateStep {
   type: 'gate';
@@ -134,7 +150,7 @@ export function withGuides(def: PipelineDef): PipelineDef {
   };
 }
 
-export const RESERVED_IDS = ['setup', 'finish', 'dev', 'verify', 'escalate', 'single'];
+export const RESERVED_IDS = ['setup', 'finish', 'dev', 'verify', 'escalate', 'single', 'dispute', 'mutation', 'strengthen'];
 const ID = /^[a-z][a-z0-9_-]{1,39}$/;
 const LOCKED = ['tests/', 'contracts/'];
 
@@ -212,6 +228,16 @@ export function validatePipeline(raw: unknown): string[] {
     const where = `Step "${s.id}"`;
     if (s.type === 'build' && s.maxAttempts !== undefined && !(Number.isInteger(s.maxAttempts) && s.maxAttempts >= 1 && s.maxAttempts <= 10)) {
       errors.push(`${where}: "maxAttempts" must be a whole number from 1 to 10.`);
+    }
+    if (s.type === 'build' && s.mutation !== undefined) {
+      const m = s.mutation as Record<string, unknown>;
+      const whole = (k: string, lo: number, hi: number) => m[k] === undefined || (Number.isInteger(m[k]) && (m[k] as number) >= lo && (m[k] as number) <= hi);
+      if (!m || typeof m !== 'object' || Array.isArray(m)) { errors.push(`${where}: "mutation" must be an object, e.g. {} or { "maxMutants": 30 }.`); }
+      else {
+        if (!whole('maxMutants', 1, 200)) { errors.push(`${where}: "mutation.maxMutants" must be a whole number from 1 to 200.`); }
+        if (!whole('rounds', 0, 3)) { errors.push(`${where}: "mutation.rounds" must be a whole number from 0 to 3.`); }
+        if (!whole('budgetMinutes', 1, 60)) { errors.push(`${where}: "mutation.budgetMinutes" must be a whole number from 1 to 60.`); }
+      }
     }
     if (s.type === 'gate') {
       if (typeof s.title !== 'string' || !s.title.trim()) { errors.push(`${where}: "title" is required.`); }
@@ -355,6 +381,12 @@ export interface Addon {
 export function listAddons(): Addon[] {
   if (!existsSync(ADDONS_DIR)) { return []; }
   return readdirSync(ADDONS_DIR).filter(f => f.endsWith('.json')).map(f => ({ ...JSON.parse(readFileSync(join(ADDONS_DIR, f), 'utf8')), id: f.replace(/\.json$/, '') }));
+}
+
+/** The same pipeline with the mutation check turned on for its build step (settings it already has are kept). */
+export function withMutation(def: PipelineDef): PipelineDef {
+  if (def.kind !== 'fast') { throw new Error(`The mutation check needs a fast pipeline; "${def.id}" is not one.`); }
+  return { ...def, steps: def.steps.map(s => (s.type === 'build' ? { ...s, mutation: s.mutation ?? {} } : s)) };
 }
 
 /** A fast pipeline with add-on steps in place, checked like any pipeline file. */

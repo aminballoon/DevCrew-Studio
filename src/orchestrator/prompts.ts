@@ -192,6 +192,23 @@ ${opts.feedback ? `\nThis is round ${opts.round}. Since your last review the dev
 End with a short summary.`;
 }
 
+/** QA strengthens its hidden tests where small changes to the code went unnoticed. */
+export function qaMutantsPrompt(mutants: { file: string; line: number; before: string; after: string }[], requirement: string, clauses: Clause[], testCommand: string): string {
+  return `${header('qa', 'mutants')}
+You are the QA engineer. Your hidden acceptance tests in acceptance/ pass on the Builder's code. To see whether they would catch mistakes, the system changed the code in one small way at a time and ran them again. They still passed after each of these changes:
+${mutants.map((m, i) => `${i + 1}. ${m.file}:${m.line}\n   - ${m.before}\n   + ${m.after}`).join('\n')}
+
+${sourceOfTruth(requirement, clauses)}
+For each change, decide from the requirement whether it makes the program behave wrongly:
+- If a clause says what must happen for some input where the changed code gives another result (a boundary, a rounding rule, an error case, an example), add a test under acceptance/ or extend one, through the names the requirement gives. Assert what the requirement says, not what the code does: if the Builder's code is itself wrong there, your test fails and the Builder fixes the code.
+- If no clause decides it (an internal detail, a log or message text, or a change that gives the same result for every input the requirement allows), skip it.
+Rules:
+- Only write under acceptance/. Keep every existing test; do not weaken any. Do not test private functions or file layout.
+- New tests must run with the existing command: ${testCommand}
+- Name each new test after its clause (R-n: what must happen); a failing name and message is all the Builder sees.
+End with one line starting with "QA_ANSWER:" saying how many tests you added and which changes you skipped, and why.`;
+}
+
 /** QA checks a hidden test the Builder says cannot be passed. */
 export function qaDisputePrompt(issue: string, last: VerifyResult | null, requirement: string, clauses: Clause[]): string {
   return `${header('qa', 'main')}

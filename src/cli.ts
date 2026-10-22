@@ -6,7 +6,7 @@ import { RunManager } from './orchestrator/RunManager';
 import { getBus } from './orchestrator/runtime';
 
 const USAGE = `Usage:
-  npm run run -- start --requirement <file> [--source <dir>] [--profile <name>] [--pipeline single|<id>] [--addons a,b] [--auto]
+  npm run run -- start --requirement <file> [--source <dir>] [--profile <name>] [--pipeline single|<id>] [--addons a,b] [--mutation] [--auto]
   npm run run -- gate <runId> <approve|revise|retry|abort> [--feedback <text>]
   npm run run -- resume <runId>     continue a run whose process stopped mid-way
   npm run run -- list
@@ -21,6 +21,7 @@ const { positionals, values } = parseArgs({
     profile: { type: 'string' },
     pipeline: { type: 'string' },
     addons: { type: 'string' },
+    mutation: { type: 'boolean', default: false },
     auto: { type: 'boolean', default: false },
     feedback: { type: 'string' },
   },
@@ -33,6 +34,7 @@ function print(e: DevcrewEvent): void {
     case 'tool_call': if (e.status !== 'completed') { console.log(`${t}          ${e.role}: ${e.title}`); } break;
     case 'guard_violation': console.log(`${t}  BLOCKED ${e.role} ${e.action}: ${e.files.join(', ')}`); break;
     case 'verify_result': console.log(`${t}  ${e.passed ? 'PASS   ' : 'FAIL   '} ${e.module}: ${e.tests.pass}/${e.tests.total} passed ${e.reasons.join('; ')}`); break;
+    case 'mutation_result': console.log(`${t}  MUTANTS ${e.skipped ?? `${e.killed}/${e.tested} caught by the hidden tests${e.survived.length ? `, ${e.survived.length} not` : ''}`}`); break;
     case 'usage': console.log(`${t}  usage   ${e.role}: ${e.totalTokens.toLocaleString()} tokens, $${e.costUsd.toFixed(3)}`); break;
     case 'gate_waiting': console.log(`${t}  WAITING at gate "${e.gate}" → npm run run -- gate ${e.runId} approve`); break;
     case 'gate_resolved': console.log(`${t}  gate    "${e.gate}": ${e.decision}`); break;
@@ -59,6 +61,7 @@ async function main(): Promise<void> {
       profile: values.profile,
       pipeline: values.pipeline,
       addons: values.addons ? values.addons.split(',') : undefined,
+      mutation: values.mutation,
       autoApprove: values.auto,
     });
     console.log(`Run ${runId}`);

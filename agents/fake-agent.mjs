@@ -34,7 +34,8 @@ class FakeAgent {
     // folder (QA's first turn works in the run's qa-workspace copy, its later ones in the workspace)
     const run = path.basename(this.cwd) === 'qa-workspace' ? path.basename(path.dirname(this.cwd)) : path.basename(this.cwd);
     // One file per role, since QA and the Builder take turns at the same time
-    const countFile = path.join(os.tmpdir(), `devcrew-fake-calls-${createHash('sha1').update(`${run}:${key}`).digest('hex').slice(0, 12)}`);
+    const countFileOf = k => path.join(os.tmpdir(), `devcrew-fake-calls-${createHash('sha1').update(`${run}:${k}`).digest('hex').slice(0, 12)}`);
+    const countFile = countFileOf(key);
     let n = 0;
     try { n = Number(fs.readFileSync(countFile, 'utf8')) || 0; } catch { /* first turn of this role in this run */ }
     fs.writeFileSync(countFile, String(n + 1));
@@ -46,6 +47,9 @@ class FakeAgent {
       await send({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: `No scripted turn for ${key}.` } });
       return { stopReason: 'end_turn' };
     }
+    // Turns that run at the same time (QA and the Builder) wait until the other has its prompt, so a
+    // fast turn never ends before a slow process has even started (seen under a loaded test run)
+    for (const deadline = Date.now() + 15_000; turn.awaits && !fs.existsSync(countFileOf(turn.awaits)) && Date.now() < deadline;) { await delay(20); }
     // Harness tests: a tool left running in the background, or the agent CLI dying mid-turn
     if (turn.background) { spawn('sh', ['-c', turn.background], { stdio: 'ignore' }); }
     if (turn.crash) { process.exit(1); }

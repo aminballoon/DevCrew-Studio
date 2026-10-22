@@ -153,6 +153,15 @@
         "FAKE_SCRIPT": "agents/scripts/cart-wrongtest.mjs"
       }
     },
+    "fake-mutants": {
+      "command": "node",
+      "args": [
+        "agents/fake-agent.mjs"
+      ],
+      "env": {
+        "FAKE_SCRIPT": "agents/scripts/cart-mutants.mjs"
+      }
+    },
     "fake-design": {
       "command": "node",
       "args": [
@@ -231,6 +240,13 @@
       "reviewer": "fake-wrongtest",
       "single": "fake-wrongtest",
       "architect": "fake-wrongtest"
+    },
+    "fake-mutants": {
+      "qa": "fake-mutants",
+      "dev": "fake-mutants",
+      "reviewer": "fake-mutants",
+      "single": "fake-mutants",
+      "architect": "fake-mutants"
     },
     "fake-design": {
       "qa": "fake-design",

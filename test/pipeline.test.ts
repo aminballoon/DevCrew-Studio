@@ -13,6 +13,7 @@ process.env.FAKE_DELAY_MS = '0';
 const { RunManager } = await import('../src/orchestrator/RunManager');
 const { getBus } = await import('../src/orchestrator/runtime');
 const { STUDIO_ROOT } = await import('../src/core/config');
+const { loadPipeline } = await import('../src/pipeline/schema');
 type PipelineDef = import('../src/pipeline/schema').PipelineDef;
 
 const TASK = join(STUDIO_ROOT, 'bench/tasks/S-01-cart');
@@ -159,6 +160,40 @@ test('a hidden test that fails twice in a row goes back to QA, who fixes it', { 
   assert.deepEqual(events.flatMap(e => (e.type === 'verify_result' ? [e.passed] : [])), [false, false, true]);
   const dispute = events.filter(e => e.type === 'agent_input' && e.role === 'qa')[1];
   assert.ok(dispute?.type === 'agent_input' && dispute.prompt.includes('failed on two attempts in a row'));
+});
+
+test('mutation check: a mistake the hidden tests miss goes to QA, whose new test catches a real bug the Builder then fixes', { timeout: 120_000 }, async () => {
+  const runs = new RunManager();
+  // Every mutant, so the sample cannot leave out the one this story is about
+  const fast = loadPipeline('fast');
+  const pipeline = { ...fast, steps: fast.steps.map(s => (s.type === 'build' ? { ...s, mutation: { maxMutants: 100 } } : s)) };
+  let workspace = '';
+  const unsubscribe = getBus().subscribe(e => { if (e.type === 'run_started') { workspace = e.workspace; } });
+  const runId = runs.start({ requirement: REQUIREMENT, source: join(TASK, 'seed'), profile: 'fake-mutants', autoApprove: true, pipeline });
+  const status = await runs.waitFor(runId);
+  unsubscribe();
+  const events = getBus().read(runId);
+  assert.equal(status, 'approved', JSON.stringify(events.filter(e => e.type === 'log' || e.type === 'run_finished')).slice(0, 2000));
+  const stages = events.flatMap(e => (e.type === 'node_started' ? [`${e.node}${e.module ? ':' + e.module : ''}`] : []));
+  assert.deepEqual(stages, ['qa', 'dev:main', 'verify:main', 'dev:main', 'verify:main', 'mutation', 'qa:mutants', 'verify:main', 'dev:main', 'verify:main', 'mutation', 'reviewer']);
+  assert.deepEqual(events.flatMap(e => (e.type === 'verify_result' ? [e.passed] : [])), [false, true, false, true]);
+
+  const checks = events.flatMap(e => (e.type === 'mutation_result' ? [e] : []));
+  assert.equal(checks.length, 2);
+  const zero = 'unitPriceCents <= 0) throw';
+  assert.ok(checks[0].survived.some(m => m.before.includes(zero) && m.after.includes('unitPriceCents < 0) throw')), JSON.stringify(checks[0].survived));
+  assert.ok(checks[0].survived.some(m => m.after.includes('qty > line.qty')));
+  assert.equal(checks[0].survived.length, 2);
+  // QA's new tests catch both, on the fixed code
+  assert.deepEqual([checks[1].tested, checks[1].survived.length, checks[1].score], [checks[0].tested, 0, 100]);
+
+  const qaTurns = events.filter(e => e.type === 'agent_input' && e.role === 'qa');
+  assert.match(qaTurns[1]?.type === 'agent_input' ? qaTurns[1].prompt : '', /src\/cart\.ts:8\n {3}- .*unitPriceCents <= 0\) throw[^\n]*\n {3}\+ .*unitPriceCents < 0\) throw/);
+  // The Builder learns of it through the failing hidden test, as for any other; every mutated file was put back
+  const fix = events.filter(e => e.type === 'agent_input' && e.role === 'dev')[2];
+  assert.ok(fix?.type === 'agent_input' && fix.prompt.includes('✖ R-1 a price of 0 cents is allowed') && !fix.prompt.includes('unitPriceCents < 0'));
+  assert.ok(readFileSync(join(workspace, 'src/cart.ts'), 'utf8').includes('unitPriceCents < 0) throw'));
+  assert.ok(existsSync(join(workspace, 'acceptance/cart-core/boundaries.test.ts')));
 });
 
 test('an unattended run that cannot go on ends as failed and says why', { timeout: 60_000 }, async () => {

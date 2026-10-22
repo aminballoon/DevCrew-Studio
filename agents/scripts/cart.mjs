@@ -242,6 +242,7 @@ export default {
   delayMs: 450,
   turns: {
     qa: [{
+      awaits: 'dev:main',
       thinking: 'Reading the requirement and the project…',
       files: {
         'acceptance/cart-core/cart.test.ts': CORE_TESTS,
@@ -257,6 +258,7 @@ export default {
     }],
     'dev:main': [
       {
+        awaits: 'qa',
         thinking: 'Reading the requirement and the project…',
         files: { 'src/cart.ts': CORE_FIXED, 'src/util/carts.ts': badHelper, 'tests/cart.test.ts': ownTest, '.devcrew/test.json': builderRun },
         commands: ['node --test "tests/**/*.test.ts"'],
