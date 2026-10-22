@@ -178,7 +178,7 @@ const qaDispute = node('qa', async s => {
   const turn = await agentTurn({ ...ctx(s, 'qa', io), scope: { write: [`${ACCEPTANCE}/`], deny: [] } }, qaDisputePrompt(s.specIssue ?? '', s.lastVerify, s.requirement, requirementClauses(s.requirement)));
   hideAcceptance(s);
   const disputes = s.disputes + 1;
-  const conflict = turn.text.match(/^REQUIREMENT_ISSUE:\s*(.+)$/m)?.[1];
+  const conflict = requirementIssue(turn.text);
   if (conflict) {
     return { disputes, feedback: `QA and the Builder found a conflict in the requirement: ${conflict}` };
   }
@@ -191,6 +191,15 @@ const qaDispute = node('qa', async s => {
     feedback: `You reported: ${s.specIssue}\nQA checked the hidden tests and answered: ${answer}\nThey are now final. Make them pass.`,
   };
 }, () => ({ module: MAIN.id }));
+
+/**
+ * A conflict QA found in the requirement, or null. QA sometimes writes the line with nothing to
+ * report ("REQUIREMENT_ISSUE: none."); taken as a conflict, that ended a run QA had just fixed.
+ */
+export function requirementIssue(text: string): string | null {
+  const issue = text.match(/^REQUIREMENT_ISSUE:\s*(.+)$/m)?.[1].trim();
+  return issue && !/^(?:none|no|nothing|n\/a|-)\b/i.test(issue) ? issue : null;
+}
 
 /**
  * Blind QA: Dev cannot see a hidden test to argue with it. When the same tests fail twice in a

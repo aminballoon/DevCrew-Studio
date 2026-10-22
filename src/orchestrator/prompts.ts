@@ -221,6 +221,6 @@ ${sourceOfTruth(requirement, clauses)}
 Check the disputed tests against the requirement clauses and against each other.
 - If a test is wrong, fix it (only files under acceptance/) so it checks what the clauses say. Keep the change small; do not rewrite other tests.
 - If the tests are right, change nothing and explain in one or two sentences why, without quoting the tests, so the Builder can make them pass.
-- If the requirement itself is contradictory, reply with a line starting with "REQUIREMENT_ISSUE:" explaining it; a person decides.
+- If the requirement itself is contradictory, reply with a line starting with "REQUIREMENT_ISSUE:" explaining it; a person decides. Leave that line out otherwise.
 End with one line starting with "QA_ANSWER:" that tells the Builder what you decided.`;
 }

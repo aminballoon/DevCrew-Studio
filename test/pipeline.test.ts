@@ -160,6 +160,10 @@ test('a hidden test that fails twice in a row goes back to QA, who fixes it', { 
   assert.deepEqual(events.flatMap(e => (e.type === 'verify_result' ? [e.passed] : [])), [false, false, true]);
   const dispute = events.filter(e => e.type === 'agent_input' && e.role === 'qa')[1];
   assert.ok(dispute?.type === 'agent_input' && dispute.prompt.includes('failed on two attempts in a row'));
+  // QA's answer said "REQUIREMENT_ISSUE: none.", which is no conflict; a real one goes to a person
+  const { requirementIssue } = await import('../src/orchestrator/graph');
+  assert.equal(requirementIssue('REQUIREMENT_ISSUE: R-2 says 10% and R-5 says 15% for the same order'), 'R-2 says 10% and R-5 says 15% for the same order');
+  for (const none of ['REQUIREMENT_ISSUE: none.', 'REQUIREMENT_ISSUE: None', 'REQUIREMENT_ISSUE: N/A', 'REQUIREMENT_ISSUE: no conflict', 'QA_ANSWER: fixed']) { assert.equal(requirementIssue(none), null, none); }
 });
 
 test('mutation check: a mistake the hidden tests miss goes to QA, whose new test catches a real bug the Builder then fixes', { timeout: 120_000 }, async () => {

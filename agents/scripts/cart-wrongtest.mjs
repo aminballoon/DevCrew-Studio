@@ -15,7 +15,8 @@ export default {
       {
         thinking: 'Checking the hidden test that keeps failing against the requirement…\n\n',
         files: { 'acceptance/cart-core/cart.test.ts': good },
-        message: 'QA_ANSWER: The expected subtotal in one test was wrong (349); the requirement gives 599. Fixed the test.',
+        // Real QA agents sometimes write the conflict line with nothing in it; that is no conflict
+        message: 'REQUIREMENT_ISSUE: none.\nQA_ANSWER: The expected subtotal in one test was wrong (349); the requirement gives 599. Fixed the test.',
       },
     ],
     // Complete and correct from the first turn; it can only fail the wrong hidden test
