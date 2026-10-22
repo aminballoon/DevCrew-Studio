@@ -152,9 +152,13 @@ function pasteFiles(workspace: string, prefixes: string[]): [string, string][] {
   return files.some(([, t]) => t.includes('\u0000')) || files.reduce((n, [, t]) => n + t.length, 0) > MAX_PASTED_CHARS ? [] : files;
 }
 
-/** The run's changes for a prompt, or nothing when they are too big to paste. */
+/**
+ * The run's changes for a prompt, or nothing when they are too big to paste. QA's hidden tests are
+ * left out: no step may change them, and they were 59% of the Reviewer's pasted diff (bench mut-1),
+ * which it read again on every model call.
+ */
 function pastedDiff(ws: Workspace): string | undefined {
-  const { patch } = diffSince(ws);
+  const { patch } = diffSince(ws, [`${ACCEPTANCE}/`]);
   return patch && patch.length <= MAX_PASTED_CHARS ? patch : undefined;
 }
 

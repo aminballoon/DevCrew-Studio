@@ -47,6 +47,12 @@ test('fast pipeline: QA and the Builder start together, the Builder fixes what t
   assert.deepEqual(verifies[1].commands, ['node --test "tests/**/*.test.ts"', 'node --test "acceptance/**/*.test.ts"']);
   // The approved commit keeps QA's tests with the code
   assert.ok(existsSync(join(workspace, 'acceptance/discounts/discounts.test.ts')));
+  // The Reviewer gets the code's diff without QA's hidden tests, which nobody may change
+  const review = events.find(e => e.type === 'agent_input' && e.role === 'reviewer');
+  const prompt = review?.type === 'agent_input' ? review.prompt : '';
+  assert.match(prompt, /diff --git a\/src\/cart\.ts b\/src\/cart\.ts/);
+  assert.match(prompt, /acceptance\/ holds QA's hidden acceptance tests \(left out of the diff\)/);
+  assert.doesNotMatch(prompt, /diff --git a\/acceptance\//);
 });
 
 test('fast-arch: the Architect designs once, Verify enforces it, and the next run builds inside it', { timeout: 90_000 }, async () => {

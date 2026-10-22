@@ -118,7 +118,7 @@ You are the code reviewer. The tests already pass; your job is what tests cannot
 ${requirement ? `\n${sourceOfTruth(requirement, clauses)}${REQUIREMENT_RULE}\n` : ''}
 Review the changes${diff ? ' (the full diff is below; read other files only where you need more context)' : ` with \`git diff ${baseCommit}\``} against contracts/, .devcrew/ARCHITECTURE.md and any ADRs, where they exist.${diff ? `\n\`\`\`diff\n${diff}\n\`\`\`` : ''}
 Look for: design problems, duplication, unclear names, missing error handling, security issues, and acceptance criteria that are tested only weakly.
-${hiddenTests ? `acceptance/ holds QA's hidden acceptance tests: Verify ran all of them and they pass, and the developer never sees them, so do not ask for changes there or for wiring them into the test script.\n` : ''}
+${hiddenTests ? `acceptance/ holds QA's hidden acceptance tests${diff ? ' (left out of the diff)' : ''}: Verify ran all of them and they pass, and the developer never sees them, so do not review them, ask for changes there or for wiring them into the test script.\n` : ''}
 Write your review to .devcrew/review.md (the only file you may write). Its first line must be exactly
 "VERDICT: approve" or "VERDICT: changes", followed by findings ordered by severity, each with file:line.`;
 }

@@ -53,15 +53,16 @@ export function prepareWorkspace(source: string | undefined, runId: string): Wor
 
 export interface DiffSummary { files: { path: string; added: number; removed: number }[]; patch: string }
 
-/** Changes since the workspace started, untracked files included. */
-export function diffSince(ws: Workspace): DiffSummary {
+/** Changes since the workspace started, untracked files included, without the folders in `exclude` (e.g. "acceptance/"). */
+export function diffSince(ws: Workspace, exclude: string[] = []): DiffSummary {
   addAll(ws.path, '--intent-to-add');
-  const numstat = git(ws.path, 'diff', '--numstat', ws.baseCommit);
+  const paths = exclude.length ? ['--', '.', ...exclude.map(p => `:(exclude)${p}`)] : [];
+  const numstat = git(ws.path, 'diff', '--numstat', ws.baseCommit, ...paths);
   const files = numstat.split('\n').filter(Boolean).map(line => {
     const [a, r, path] = line.split('\t');
     return { path, added: Number(a) || 0, removed: Number(r) || 0 };
   });
-  const patch = git(ws.path, 'diff', ws.baseCommit).slice(0, 200_000);
+  const patch = git(ws.path, 'diff', ws.baseCommit, ...paths).slice(0, 200_000);
   return { files, patch };
 }
 
