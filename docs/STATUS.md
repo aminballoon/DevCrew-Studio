@@ -1,6 +1,32 @@
 # สถานะโปรเจกต์
 
-อัปเดตล่าสุด: 2026-10-15
+อัปเดตล่าสุด: 2026-10-23
+
+## Latest changes (2026-10-23, mutation check)
+- **Why:** LLM-written tests catch few faulty solutions (SWE-Mutation, ACL 2026: 36% at best), agents pass visible suites while failing held-out ones mostly through untested compositions and edge cases (SpecBench, arXiv 2605.21384), and Meta's ACH writes tests to kill mutants. The Builder never sees QA's hidden tests, so nothing told QA where they were thin.
+- **Mutation check** (build step option `"mutation"`, off by default; `--mutation`, the New run form's checkbox, bench arm `multi-fast-mut`): once Verify passes, `src/guard/mutation.ts` changes the lines the run wrote one small way at a time (boundary, equality, arithmetic, logic, boolean, negation, floor/ceil, min/max, number +1; string concatenation left alone), samples 30 spread over lines, and runs the hidden tests on each. Survivors go to QA once, which adds tests where a clause decides the behaviour and skips the rest with reasons; the new tests run on the real code, so a bug they find reaches the Builder as a failing hidden test. A second check measures. Text-level operators cover TS/JS, Python, C/C++, Rust and Go with no tool installed in the project; a journal puts a mutated file back after a crash.
+- **Bench `mut-1`** (S-01, L-01, L-02, L-03; Haiku; 2 reps; one mutation cell set aside, see below):
+
+  | Arm | Resolved | Hidden | Tokens/run (median) | $/run | Min/run | QA tokens | Mutation score |
+  |---|---|---|---|---|---|---|---|
+  | fast | 8/8 | 164/164 | 1.81M (1.98M) | 0.15 | 6.3 | 479k | |
+  | fast + mutation | 7/7 | 131/131 | 1.46M (1.31M) | 0.11 | 5.4 | 599k | 87% → 91% |
+
+  - The check costs QA about 120k tokens a run and 13-34 s of test runs. Lower total tokens on the mutation arm come from the Reviewer (630k vs 392k a run, range 0.25-1.3M), not from the check.
+  - QA used survivors well: S-01 added 3 tests that killed all 3; L-02 skipped both (no clause sets a key format or the first transaction number); L-03 added 2 boundary tests and skipped 4 no clause decides. What survives after is mostly equivalent mutants.
+  - No added test failed on the code: the fast team already resolves every one of these tasks (every multi-fast cell in bench history is at 100%), so this set can show stronger hidden tests and their cost, not more tasks resolved. That needs tasks where hidden tests miss bugs (fast-arch's JPY miss in roadmap-self is one).
+- **Bug found and fixed:** QA settled a dispute by fixing its own test and answered `REQUIREMENT_ISSUE: none.`; any text after the marker counted as a conflict, so the run escalated and, unattended, failed with correct code (L-01, graded 33/33). An empty answer is no conflict now (`b78e65f`); that cell is in `mut-1/stale/`.
+- **Flaky test fixed:** the fake agent's first QA and Builder turns wait for each other, so "both turns began before either finished" no longer fails under load.
+- **Handoffs measured** (mut-1 event logs): what DevCrew hands a role is small. The Builder gets ~2.1k tokens a run and reads 517k, QA ~2.3k of 373k (under 1%); the rest is each agent re-reading its own session on every model call (16-26 calls at 16-26k context each), as SWE-Marathon found (99.5% of input is replay). The Reviewer was the exception: 17.5k tokens pasted, 59% of the diff being QA's hidden tests (src/ 21%, the Builder's tests 18%), which it is told not to review.
+- **Reviewer's pasted diff leaves out acceptance/** (`cae042f`; the code gate still shows everything). Bench `rev-1` (fast, same 4 tasks x 2, Haiku) against mut-1's fast arm:
+
+  | | Resolved | First Reviewer prompt | Reviewer tokens/run (median) | Reviewer calls | Run tokens | $/run |
+  |---|---|---|---|---|---|---|
+  | before (mut-1) | 8/8 | 12.8k | 630k (585k) | 19.8 | 1.81M | 0.15 |
+  | after (rev-1) | 8/8 | 5.9k | 412k (402k) | 17.4 | 1.60M | 0.10 |
+
+  The prompt halving is exact; the token drop is within the noise (one task's Reviewer ranges 0.13-1.3M between reps, and mut-1's mutation arm had a 268k median Reviewer before the change), so it says "no worse, probably cheaper", not how much. What drives a Reviewer's tokens is how many files it opens, not the prompt.
+- Tests: 64.
 
 ## Latest changes (2026-10-15, one set of pipelines)
 - **Ships three ways to run:** Single AI (`--pipeline single`, first in the New run form), `fast` (the default) and `fast-arch`, plus `system-integration` for design only. The nine Planner pipelines (standard, minimal, minimal-skills, with-security x3, with-docs, existing-code, firmware-board), their drafts, two preset pages and the bench arms that used them are gone; three are kept in `test/fixtures/pipelines/` because the Planner engine is still there and tested.
