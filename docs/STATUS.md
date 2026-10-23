@@ -2,6 +2,25 @@
 
 อัปเดตล่าสุด: 2026-10-23
 
+## Latest changes (2026-10-23, the JPY miss found; QA's reasons and the example check)
+- **Root cause of the JPY miss** (roadmap-self and roadmap-mut): the clause splitter dropped lines under 12 characters, and the Builder and QA get the requirement only as the numbered clause list. XL-07's "JPY: `¥1,235`" is 11 characters, so neither role ever saw it; the THB, USD and KWD lines were just long enough. HW-01's "`PING` → `PONG`" and XL-10's "then by `id`." were dropped the same way. A line with a code span is always a clause now (`2d54227`).
+- **QA explains every hidden test** (`4801820`): QA writes `acceptance/why.json` (per test: the clause and one sentence on the behaviour it protects). The system checks with no AI that every test has a reason citing clauses that exist, that no test reads DevCrew's own files (`.devcrew/`, `acceptance.json`; R-34 on L-02 and R-50 on L-01 each cost a dispute before), and that every exact example in the requirement (money amounts, decimals, example sentences) is asserted verbatim; problems go back to QA once. When hidden tests fail, the Builder's prompt quotes each one's clause and QA's reason, never the test code. The Builder's first prompt lists the clauses with exact outputs as a checklist.
+- **Bench harness** (`177e7b4`): the first runs of these suites happened with the lid closed on battery; the Mac slept and every agent turn hung to its 60-minute limit. After each run the harness now reads macOS's power log and the agents' messages, and runs a cell again when the machine slept or lost the network (it flags all 18 of those runs, now in `bench/results/stale-slept/`, and none of the 28 in rev-1 and roadmap-mut). No run below slept.
+- **Bench** (Haiku, 2 reps; both changes together, so their effects are not separated):
+
+  | Suite | Arm | Resolved | Hidden | Hidden fails / failed again after a fix / disputes | QA sent back by the checks | Tokens/run | $/run | Min |
+  |---|---|---|---|---|---|---|---|---|
+  | rev-1 (before) | fast, simple set | 8/8 | 164/164 | 1 / 0 / 1 | | 1.60M | 0.10 | 6.1 |
+  | why-1 (after) | fast, simple set | 8/8 | 164/164 | 2 / 1 / 2 | 0 | 2.19M | 0.14 | 7.8 |
+  | roadmap-mut (before) | fast-arch, XL-06..10 | 10/10 | 184/184 | 0 / 0 / 0 | | 2.32M | 0.20 | 5.8 |
+  | roadmap-why (after) | fast-arch, XL-06..10 | 10/10 | 184/184 | 0 / 0 / 1 | 0 | 2.88M | 0.23 | 6.7 |
+
+  - Both XL-07 runs assert `¥1,235` verbatim, and the JPY formatting passed in every round. Two clean reps cannot prove the miss is gone (it was 1 in 4 before), but the cause is removed.
+  - Every QA suite passed the system's checks on its first turn: no test of DevCrew files, every example asserted, every test explained. The check is a backstop; the prompt did the work.
+  - The Builder received the clause and QA's reason every time a hidden test failed. All three failures in the new suites were QA's tests, not the code: an import scanner that read the string `'from'` as an import (R-49 "No dependencies", twice) and a field-order check that compared sorted keys with an unsorted list (XL-06 R-22). The Builder left the code alone, each went to a dispute after two failures, and QA fixed its test.
+  - Cost: QA's reasons add tokens. QA 407k → 603k a run on the simple set, 455k → 831k on the roadmap; whole runs +37% and +24% (within the 1.3-3.9M spread runs of one task show, so the size is not settled). roadmap-why costs the same as roadmap-self-2 ($0.23 a round).
+  - Next: a "No dependencies" clause is better checked by the system (package.json and imports) than by a hand-written regex in QA's tests, which broke twice here.
+
 ## Latest changes (2026-10-23, mutation check)
 - **Why:** LLM-written tests catch few faulty solutions (SWE-Mutation, ACL 2026: 36% at best), agents pass visible suites while failing held-out ones mostly through untested compositions and edge cases (SpecBench, arXiv 2605.21384), and Meta's ACH writes tests to kill mutants. The Builder never sees QA's hidden tests, so nothing told QA where they were thin.
 - **Mutation check** (build step option `"mutation"`, off by default; `--mutation`, the New run form's checkbox, bench arm `multi-fast-mut`): once Verify passes, `src/guard/mutation.ts` changes the lines the run wrote one small way at a time (boundary, equality, arithmetic, logic, boolean, negation, floor/ceil, min/max, number +1; string concatenation left alone), samples 30 spread over lines, and runs the hidden tests on each. Survivors go to QA once, which adds tests where a clause decides the behaviour and skips the rest with reasons; the new tests run on the real code, so a bug they find reaches the Builder as a failing hidden test. A second check measures. Text-level operators cover TS/JS, Python, C/C++, Rust and Go with no tool installed in the project; a journal puts a mutated file back after a crash.
