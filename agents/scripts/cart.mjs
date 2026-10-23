@@ -97,6 +97,19 @@ test('AC-8 total never goes below zero', () => {
 });
 `;
 
+// QA's reason for each hidden test, by the S-01 clause it checks
+const WHY = JSON.stringify([
+  { test: 'AC-1 adds lines and tops up existing SKUs', clause: 'R-2, R-8', why: 'Adding an existing SKU must raise its quantity, and items() keeps insertion order.' },
+  { test: 'AC-2 rejects invalid price and quantity', clause: 'R-3, R-4', why: 'Negative prices and zero or fractional quantities are invalid and must throw RangeError.' },
+  { test: 'AC-3 rejects a price change for an existing SKU', clause: 'R-5', why: 'One SKU has one price; a different price for it must throw Error.' },
+  { test: 'AC-4 removes partially, fully and rejects unknown SKUs', clause: 'R-6, R-7', why: 'removeItem takes units off, drops the line when qty is omitted or too big, and throws for unknown SKUs.' },
+  { test: 'AC-5 subtotal multiplies price by quantity', clause: 'R-9, R-13', why: 'The subtotal is price times quantity summed over lines, and the total equals it with no code.' },
+  { test: 'AC-6 SAVE10 rounds the discount down', clause: 'R-10', why: 'SAVE10 takes 10% off and rounds the discount down, so 1999 cents pays 1800.' },
+  { test: 'AC-6 FLAT5 needs a subtotal of 2000', clause: 'R-10', why: 'FLAT5 takes 500 cents off only from a subtotal of 2000 cents, and nothing below it.' },
+  { test: 'AC-7 last code wins and unknown codes throw', clause: 'R-11, R-12', why: 'Only the last applied code counts, and an unknown code must throw Error.' },
+  { test: 'AC-8 total never goes below zero', clause: 'R-13', why: 'A discount can never make the total negative.' },
+], null, 2);
+
 const CORE_BUGGY = String.raw`export interface CartLine { sku: string; unitPriceCents: number; qty: number }
 
 export class Cart {
@@ -247,6 +260,7 @@ export default {
       files: {
         'acceptance/cart-core/cart.test.ts': CORE_TESTS,
         'acceptance/discounts/discounts.test.ts': DISCOUNT_TESTS,
+        'acceptance/why.json': WHY,
         '.devcrew/acceptance.json': JSON.stringify({ testCommand: 'node --test "acceptance/**/*.test.ts"' }),
       },
       message: 'Acceptance tests for every clause in acceptance/cart-core and acceptance/discounts.',

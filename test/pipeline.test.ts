@@ -47,6 +47,13 @@ test('fast pipeline: QA and the Builder start together, the Builder fixes what t
   assert.deepEqual(verifies[1].commands, ['node --test "tests/**/*.test.ts"', 'node --test "acceptance/**/*.test.ts"']);
   // The approved commit keeps QA's tests with the code
   assert.ok(existsSync(join(workspace, 'acceptance/discounts/discounts.test.ts')));
+  // QA's suite passed the system's checks, so QA had one turn; the Builder's fix names each failing
+  // hidden test's clause in the customer's words and QA's reason, never the test itself
+  assert.equal(events.filter(e => e.type === 'agent_input' && e.role === 'qa').length, 1);
+  const fix = events.filter(e => e.type === 'agent_input' && e.role === 'dev')[1];
+  const fixPrompt = fix?.type === 'agent_input' ? fix.prompt : '';
+  assert.match(fixPrompt, /What each failing hidden test checks, and why:\n- "AC-6 SAVE10 rounds the discount down"\n {3}R-10: `applyDiscount\(code: string\)`: `SAVE10` takes 10% off[^\n]*\n {3}Why it matters \(QA\): SAVE10 takes 10% off and rounds the discount down/);
+  assert.doesNotMatch(fixPrompt, /assert\.equal\(c\.total\(\), 1800\)/);
   // The Reviewer gets the code's diff without QA's hidden tests, which nobody may change
   const review = events.find(e => e.type === 'agent_input' && e.role === 'reviewer');
   const prompt = review?.type === 'agent_input' ? review.prompt : '';
@@ -204,6 +211,25 @@ test('mutation check: a mistake the hidden tests miss goes to QA, whose new test
   assert.ok(fix?.type === 'agent_input' && fix.prompt.includes('✖ R-1 a price of 0 cents is allowed') && !fix.prompt.includes('unitPriceCents < 0'));
   assert.ok(readFileSync(join(workspace, 'src/cart.ts'), 'utf8').includes('unitPriceCents < 0) throw'));
   assert.ok(existsSync(join(workspace, 'acceptance/cart-core/boundaries.test.ts')));
+});
+
+test("QA's hidden tests are checked: a test of DevCrew's files and tests with no reason go back to QA once", { timeout: 60_000 }, async () => {
+  const runs = new RunManager();
+  const runId = runs.start({ requirement: REQUIREMENT, source: join(TASK, 'seed'), profile: 'fake-why', autoApprove: true, pipeline: 'fast' });
+  const status = await runs.waitFor(runId);
+  const events = getBus().read(runId);
+  assert.equal(status, 'approved', JSON.stringify(events.filter(e => e.type === 'log' || e.type === 'run_finished')).slice(0, 2000));
+  const qaTurns = events.flatMap(e => (e.type === 'agent_input' && e.role === 'qa' ? [e.prompt] : []));
+  assert.equal(qaTurns.length, 2);
+  assert.match(qaTurns[1], /acceptance\/cart-core\/extra\.test\.ts reads DevCrew's own files/);
+  assert.match(qaTurns[1], /acceptance\/why\.json is missing/);
+  assert.ok(events.some(e => e.type === 'log' && e.level === 'info' && e.message.startsWith("QA's hidden tests: 2 problem(s) sent back to QA")));
+  assert.ok(!events.some(e => e.type === 'log' && e.level === 'warn'), 'the second turn fixed everything');
+  // The fixed suite is the one that judged and was committed
+  const workspace = events.find(e => e.type === 'run_started');
+  const ws = workspace?.type === 'run_started' ? workspace.workspace : '';
+  assert.match(readFileSync(join(ws, 'acceptance/cart-core/extra.test.ts'), 'utf8'), /R-6 removing exactly the quantity/);
+  assert.equal(JSON.parse(readFileSync(join(ws, 'acceptance/why.json'), 'utf8')).length, 10);
 });
 
 test('an unattended run that cannot go on ends as failed and says why', { timeout: 60_000 }, async () => {

@@ -813,6 +813,7 @@ function stepLines(s) {
         break;
       case 'log':
         if (e.level === 'info' && e.message.startsWith('QA after the mutation check')) { line('says', esc(e.message), 'say'); break; }
+        if (e.message.startsWith("QA's hidden tests")) { line(e.level === 'warn' ? 'checks' : 'sent back', esc(e.message), e.level === 'warn' ? 'warnline' : 'muted'); break; }
         if (e.level === 'error') line('error', `Something went wrong<details><summary>Details</summary><pre>${esc(e.message)}</pre></details>`, 'badline');
         break;
       case 'run_finished':

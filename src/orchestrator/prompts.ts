@@ -1,6 +1,7 @@
 import type { Role } from '../core/events';
 import type { VerifyResult } from '../guard/verify';
 import { SYSTEM_DIAGRAM, type AgentStep } from '../pipeline/schema';
+import { exampleClauses, requirementExamples, WHY_FILE } from './acceptance';
 import { clauseList, type Clause } from './requirement';
 import { SYSTEM_FORMAT } from './system';
 import { TEST_FORMATS } from '../guard/testFormats';
@@ -61,6 +62,14 @@ ${feedback ? `\nA change to the design is asked for. Change it as little as the 
 End with a short summary of the design.`;
 }
 
+/** The clauses that show exact outputs: each must come out character for character. */
+function exampleChecklist(clauses: Clause[]): string {
+  const withExamples = exampleClauses(clauses);
+  return withExamples.length
+    ? `\nThese clauses give exact outputs. Before you finish, check each one: your code must produce them character for character.\n${withExamples.map(c => `- [ ] ${c.id}: ${c.text}`).join('\n')}\n`
+    : '';
+}
+
 export function builderPrompt(requirement: string, clauses: Clause[], guide?: string, architecture: [string, string][] = [], reports: [string, string][] = []): string {
   return `${header('dev', 'main', 1)}
 You are the Builder. You alone plan and write the code for this requirement, with your own tests.
@@ -71,9 +80,23 @@ ${architecture.length ? `The project's architecture is fixed. Put each piece of 
 1. Look at the existing files, then implement everything the requirement asks, in the project's own language and conventions.
 2. Write tests in tests/ for the behaviour the requirement describes, with the project's own test tool, and run them until they pass. Keep them lean.
 3. Write ${runFile(BUILDER_TESTS, 'your tests')}
-${roleGuide(guide)}
+${exampleChecklist(clauses)}${roleGuide(guide)}
 Do not write anything under acceptance/. If the requirement contradicts itself, follow the most specific clause and say which one in your summary.
 End with a short summary of what you built.`;
+}
+
+/** QA's reason for each test: shown to the Builder, with the clause, when the test fails. */
+const whyFile = () => `Write ${WHY_FILE}: a JSON list with one entry per test, { "test": "<the exact test name>", "clause": "R-n", "why": "<one sentence: the behaviour it protects and why the requirement needs it>" }. When a test fails, the Builder sees its clause and your reason (never your code), so make the reason say what must be true, not how you check it. A test with no clause to cite should not exist.`;
+
+/** The exact examples QA must assert verbatim; the system checks they are there. */
+function examplesToAssert(clauses: Clause[]): string {
+  const examples = requirementExamples(clauses);
+  return examples.length ? ` The system checks that each of these appears verbatim in your tests: ${examples.map(e => `${e.clause} \`${e.text}\``).join(', ')}.` : '';
+}
+
+/** QA's hidden tests broke the rules the system checks; one turn to fix them. */
+export function acceptanceFixPrompt(problems: string[]): string {
+  return `${header('qa', 'checks')}\nThe system checked your acceptance tests and found:\n${problems.map(p => `- ${p}`).join('\n')}\nFix them: change only files under acceptance/, and keep ${WHY_FILE} in step with the tests.`;
 }
 
 export function fastQaPrompt(requirement: string, clauses: Clause[], guide?: string, contracts: [string, string][] = [], reports: [string, string][] = []): string {
@@ -84,12 +107,14 @@ Do this:
 1. Look at the existing files to learn the language, the test tool and any code there already.
 2. Write acceptance tests under acceptance/ (for example acceptance/main.test.ts) that check every clause, using exactly the names, paths and signatures the requirement gives. Import the code from where the requirement or the existing project says it lives. Where the requirement leaves a name open, test only behaviour you can reach through the names it does give.
 3. Name each test after the clause and the behaviour (R-n: what must happen), and give assertions clear messages: a failing name and message is all the Builder will see.
-4. Write ${runFile(ACCEPTANCE_RUN, 'every test under acceptance/ (and nothing else)')}
+4. ${whyFile()}
+5. Write ${runFile(ACCEPTANCE_RUN, 'every test under acceptance/ (and nothing else)')}
    When acceptance/ already has tests, they check what the project does today: keep them, update the ones this change makes wrong, and add tests for what it adds. The command runs them all, so a change that breaks earlier behaviour fails.
 
 Rules:
 - Only write under acceptance/ and ${ACCEPTANCE_RUN}. There is no code yet: check your tests only for syntax, do not wait for an implementation.
-- Keep the suite lean: about one test per clause, more only where a clause states a limit, an error or a security property. A test asserts every exact example its clause gives (an input and its output): an example left out is a mistake nothing catches.
+- Keep the suite lean: about one test per clause, more only where a clause states a limit, an error or a security property. A test asserts every exact example its clause gives (an input and its output): an example left out is a mistake nothing catches.${examplesToAssert(clauses)}
+- Test only behaviour the requirement describes. Never read DevCrew's files (.devcrew/, acceptance.json) or test how the tests are run: that is not what the customer asked for, and the Builder cannot fix it.
 - Every test must agree with the requirement and with every other test.
 ${roleGuide(guide)}
 End with the list of test files and the clauses each covers.`;
@@ -99,7 +124,7 @@ export function builderFixPrompt(attempt: number, last: VerifyResult | null, fee
   return `${header('dev', 'main', attempt)}
 ${!last || last.passed ? '' : `Your work did not pass verification:
 ${last.reasons.map(r => `- ${r}`).join('\n')}
-
+${last.context ? `\n${last.context}Fix the behaviour the clause describes; do not write code aimed at one test.\n` : ''}
 Test output (tail; hidden acceptance tests show only their names and failure messages):
 \`\`\`
 ${last.output.slice(-4000)}
@@ -205,7 +230,7 @@ For each change, decide from the requirement whether it makes the program behave
 Rules:
 - Only write under acceptance/. Keep every existing test; do not weaken any. Do not test private functions or file layout.
 - New tests must run with the existing command: ${testCommand}
-- Name each new test after its clause (R-n: what must happen); a failing name and message is all the Builder sees.
+- Name each new test after its clause (R-n: what must happen), and add it to ${WHY_FILE} with its clause and reason.
 End with one line starting with "QA_ANSWER:" saying how many tests you added and which changes you skipped, and why.`;
 }
 
@@ -219,7 +244,7 @@ ${issue}
 ${last ? `\nLast test run (tail):\n\`\`\`\n${last.output.slice(-3000)}\n\`\`\`\n` : ''}
 ${sourceOfTruth(requirement, clauses)}
 Check the disputed tests against the requirement clauses and against each other.
-- If a test is wrong, fix it (only files under acceptance/) so it checks what the clauses say. Keep the change small; do not rewrite other tests.
+- If a test is wrong, fix it (only files under acceptance/) so it checks what the clauses say, and update its entry in ${WHY_FILE}. Keep the change small; do not rewrite other tests. A test of DevCrew's own files (.devcrew/) or of how tests are run is wrong: remove it.
 - If the tests are right, change nothing and explain in one or two sentences why, without quoting the tests, so the Builder can make them pass.
 - If the requirement itself is contradictory, reply with a line starting with "REQUIREMENT_ISSUE:" explaining it; a person decides. Leave that line out otherwise.
 End with one line starting with "QA_ANSWER:" that tells the Builder what you decided.`;

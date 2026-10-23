@@ -57,6 +57,8 @@ export interface VerifyResult {
   output: string;
   /** Which test output format the counts were read from. */
   format?: string | null;
+  /** For the Builder: the clause and QA's reason behind each failing hidden test. */
+  context?: string;
 }
 
 /**

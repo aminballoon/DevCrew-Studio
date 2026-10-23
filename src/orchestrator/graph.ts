@@ -13,7 +13,8 @@ import { addedLines, mutationScore, restorePending, runMutationCheck, type Mutan
 import { captureBaseline, countDeclaredTests, verify, type TestBaseline, type VerifyResult } from '../guard/verify';
 import { commitAll, diffSince, prepareWorkspace, type Workspace } from '../guard/workspace';
 import { readTestRun, readText, type TestRun } from './testRun';
-import { ACCEPTANCE_RUN, agentStepPrompt, filesBlock, BUILDER_TESTS, builderFixPrompt, builderPrompt, fastQaPrompt, qaDisputePrompt, qaMutantsPrompt } from './prompts';
+import { acceptanceProblems, failureContext, readReasons } from './acceptance';
+import { acceptanceFixPrompt, ACCEPTANCE_RUN, agentStepPrompt, filesBlock, BUILDER_TESTS, builderFixPrompt, builderPrompt, fastQaPrompt, qaDisputePrompt, qaMutantsPrompt } from './prompts';
 import { requirementClauses } from './requirement';
 import { collectReports } from './reports';
 import { readSystem } from './system';
@@ -340,6 +341,14 @@ const fastWork = (def: PipelineDef) => node('qa', async s => {
       if (countDeclaredTests(copy, `${ACCEPTANCE}/`) === 0) {
         await agentTurn({ ...qa, continues: true }, `No test cases were found under ${ACCEPTANCE}/. Write the acceptance tests now.`);
       }
+      // Every example asserted, every test with a clause and a reason, none about DevCrew's files: one turn to fix
+      const problems = acceptanceProblems(copy, clauses);
+      if (problems.length) {
+        getBus().emit(s.runId, { type: 'log', level: 'info', message: `QA's hidden tests: ${problems.length} problem(s) sent back to QA: ${problems.join(' | ').slice(0, 600)}` });
+        await agentTurn({ ...qa, continues: true }, acceptanceFixPrompt(problems));
+        const left = acceptanceProblems(copy, clauses);
+        if (left.length) { getBus().emit(s.runId, { type: 'log', level: 'warn', message: `QA's hidden tests still have ${left.length} problem(s): ${left.join(' | ').slice(0, 600)}` }); }
+      }
     }),
   ]);
   getBus().emit(s.runId, { type: 'node_finished', node: 'dev' });
@@ -396,6 +405,8 @@ const fastVerify = node('verify', async s => {
     tests: hidden.tests,
     reasons: [...own.reasons.map(r => `Your tests: ${r}`), ...hidden.reasons.map(r => `Hidden tests: ${r}`), ...architecture],
     output: `--- your tests ---\n${own.output.slice(-3000)}\n\n--- hidden acceptance tests ---\n${hidden.output}`,
+    // The clause and QA's reason behind each failing hidden test, so the Builder fixes the right behaviour
+    context: hidden.passed ? undefined : failureContext(failingTests(hidden.output), readReasons(runDir(s.runId)), requirementClauses(s.requirement)) || undefined,
   };
   getBus().emit(s.runId, { type: 'verify_result', module: MAIN.id, attempt: s.attempt, passed: result.passed, tests: result.tests, reasons: result.reasons, output: result.output.slice(-6000), commands });
   return { lastVerify: result, allModulesDone: result.passed, feedback: null, specIssue: repeatedHiddenFailure(s, result) };
