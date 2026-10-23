@@ -41,6 +41,13 @@ export function requirementExamples(clauses: Clause[]): Example[] {
     .map(text => ({ clause: c.id, text })));
 }
 
+/** The clause that says the project has no dependencies; the system checks it, not QA. */
+export const noDependenciesClause = (clauses: Clause[]): Clause | undefined =>
+  clauses.find(c => /\bno (?:runtime |third[- ]party |external |npm )?dependenc(?:y|ies)\b/i.test(c.text));
+
+/** The clause starts with "No dependencies", rather than mentioning it inside a wider rule. */
+export const aboutDependencies = (c: Clause) => /^no (?:runtime |third[- ]party |external |npm )?dependenc/i.test(c.text.replace(/^[^A-Za-z]+/, ''));
+
 /** The clauses that give exact examples, for the Builder's checklist. */
 export const exampleClauses = (clauses: Clause[]) => {
   const ids = new Set(requirementExamples(clauses).map(e => e.clause));
@@ -100,6 +107,12 @@ export function acceptanceProblems(dir: string, clauses: Clause[]): string[] {
   const byName = new Map(reasons.map(r => [r.test, r]));
   const unexplained = names.filter(n => !byName.has(n));
   if (unexplained.length) { problems.push(`${WHY_FILE} has no reason for: ${unexplained.slice(0, 15).map(n => `"${n}"`).join(', ')}${unexplained.length > 15 ? ` and ${unexplained.length - 15} more` : ''}.`); }
+  // Only a clause that is about dependencies ("No dependencies."): in IT-01 it is part of R-1, the whole feature
+  const noDeps = noDependenciesClause(clauses);
+  const systemChecked = noDeps && aboutDependencies(noDeps) ? reasons.filter(r => clauseIds(r.clause).length && clauseIds(r.clause).every(id => id === noDeps.id)) : [];
+  if (systemChecked.length) {
+    problems.push(`${noDeps!.id} ("${noDeps!.text}") is checked by the system from package.json and the imports, so remove the tests that check only it: ${systemChecked.map(r => `"${r.test}"`).join(', ')}.`);
+  }
   const bad = reasons.filter(r => !clauseIds(r.clause).length || clauseIds(r.clause).some(id => !ids.has(id)) || r.why.trim().length < 20);
   if (bad.length) {
     problems.push(`In ${WHY_FILE}, each "clause" must name requirement clauses that exist (R-1 to R-${clauses.length}) and each "why" must say in a sentence what behaviour it protects. Fix: ${bad.slice(0, 10).map(r => `"${r.test}"`).join(', ')}.`);

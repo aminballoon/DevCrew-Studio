@@ -90,6 +90,9 @@ const JS = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 const JS_IMPORT = /(?:^|[^\w.])(?:import|export)\s[^'"`]*?from\s*['"]([^'"]+)['"]|(?:^|[^\w.])import\s*['"]([^'"]+)['"]|(?:require|import)\s*\(\s*['"]([^'"]+)['"]\s*\)/gm;
 const PY_IMPORT = /^\s*(?:from\s+(\.*[\w.]*)\s+import\s+([\w*, ()]+)|import\s+([\w., ]+))/gm;
 
+/** Every module specifier a JS/TS file imports, as written ("./x.ts", "node:fs", "lodash"). */
+export const specifiersOf = (source: string): string[] => [...source.matchAll(JS_IMPORT)].flatMap(m => (m[1] ?? m[2] ?? m[3] ? [m[1] ?? m[2] ?? m[3]] : []));
+
 /** Workspace files a source file imports, resolved; imports of packages are left out. */
 export function importsOf(file: string, source: string, files: Set<string>): string[] {
   const out = new Set<string>();

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { STUDIO_ROOT } from '../src/core/config';
-import { acceptanceProblems, declaredTestNames, exampleClauses, failureContext, isExample, requirementExamples } from '../src/orchestrator/acceptance';
+import { aboutDependencies, acceptanceProblems, declaredTestNames, exampleClauses, failureContext, isExample, noDependenciesClause, requirementExamples } from '../src/orchestrator/acceptance';
 import { requirementClauses } from '../src/orchestrator/requirement';
 
 const task = (id: string) => requirementClauses(readFileSync(join(STUDIO_ROOT, 'bench/tasks', id, 'requirement.md'), 'utf8'));
@@ -69,4 +69,18 @@ test('the Builder is told the clause in the customer\'s words and QA\'s reason, 
     '',
   ].join('\n'));
   assert.equal(failureContext(['nothing known'], reasons, clauses), '');
+});
+
+test('the "no dependencies" clause is the system\'s: a test that checks only it goes back to QA, a feature clause that mentions it does not', () => {
+  assert.deepEqual([noDependenciesClause(task('S-01-cart'))?.id, aboutDependencies(noDependenciesClause(task('S-01-cart'))!)], ['R-14', true]);
+  assert.deepEqual([noDependenciesClause(task('IT-01-invoice-conflict'))?.id, aboutDependencies(noDependenciesClause(task('IT-01-invoice-conflict'))!)], ['R-1', false]);
+  assert.equal(noDependenciesClause(task('L-04-zenoh')), undefined, '"the crate and its dependencies ... keep them" is not a no-dependencies rule');
+
+  const deps = requirementClauses('- `formatMoney(amount)` prints money.\n- No dependencies.');
+  const tests = { 'acceptance/a.test.ts': "test('R-1 prints', () => {});\ntest('R-2 imports nothing', () => {});\n" };
+  const why = [{ test: 'R-1 prints', clause: 'R-1', why: 'Amounts must print as money, the core of the feature.' }, { test: 'R-2 imports nothing', clause: 'R-2', why: 'The library must not depend on any package.' }];
+  const problems = acceptanceProblems(suite({ ...tests, 'acceptance/why.json': JSON.stringify(why) }), deps);
+  assert.deepEqual(problems, ['R-2 ("No dependencies.") is checked by the system from package.json and the imports, so remove the tests that check only it: "R-2 imports nothing".']);
+  const inFeature = requirementClauses('- Build `formatMoney(amount)` in TypeScript, no dependencies.\n- Amounts print with two decimals.');
+  assert.deepEqual(acceptanceProblems(suite({ ...tests, 'acceptance/why.json': JSON.stringify(why) }), inFeature), []);
 });

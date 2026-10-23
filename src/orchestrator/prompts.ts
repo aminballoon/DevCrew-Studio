@@ -1,7 +1,7 @@
 import type { Role } from '../core/events';
 import type { VerifyResult } from '../guard/verify';
 import { SYSTEM_DIAGRAM, type AgentStep } from '../pipeline/schema';
-import { exampleClauses, requirementExamples, WHY_FILE } from './acceptance';
+import { aboutDependencies, exampleClauses, noDependenciesClause, requirementExamples, WHY_FILE } from './acceptance';
 import { clauseList, type Clause } from './requirement';
 import { SYSTEM_FORMAT } from './system';
 import { TEST_FORMATS } from '../guard/testFormats';
@@ -94,6 +94,14 @@ function examplesToAssert(clauses: Clause[]): string {
   return examples.length ? ` The system checks that each of these appears verbatim in your tests: ${examples.map(e => `${e.clause} \`${e.text}\``).join(', ')}.` : '';
 }
 
+/** Clauses the system checks itself, which QA must not write tests for. */
+function systemChecks(clauses: Clause[]): string {
+  const noDeps = noDependenciesClause(clauses);
+  if (!noDeps) { return ''; }
+  const what = aboutDependencies(noDeps) ? `${noDeps.id} ("${noDeps.text}")` : `the "no dependencies" part of ${noDeps.id}`;
+  return `\n- Do not write a test for ${what}: the system checks it from package.json and every import.`;
+}
+
 /** QA's hidden tests broke the rules the system checks; one turn to fix them. */
 export function acceptanceFixPrompt(problems: string[]): string {
   return `${header('qa', 'checks')}\nThe system checked your acceptance tests and found:\n${problems.map(p => `- ${p}`).join('\n')}\nFix them: change only files under acceptance/, and keep ${WHY_FILE} in step with the tests.`;
@@ -114,7 +122,7 @@ Do this:
 Rules:
 - Only write under acceptance/ and ${ACCEPTANCE_RUN}. There is no code yet: check your tests only for syntax, do not wait for an implementation.
 - Keep the suite lean: about one test per clause, more only where a clause states a limit, an error or a security property. A test asserts every exact example its clause gives (an input and its output): an example left out is a mistake nothing catches.${examplesToAssert(clauses)}
-- Test only behaviour the requirement describes. Never read DevCrew's files (.devcrew/, acceptance.json) or test how the tests are run: that is not what the customer asked for, and the Builder cannot fix it.
+- Test only behaviour the requirement describes. Never read DevCrew's files (.devcrew/, acceptance.json) or test how the tests are run: that is not what the customer asked for, and the Builder cannot fix it.${systemChecks(clauses)}
 - Every test must agree with the requirement and with every other test.
 ${roleGuide(guide)}
 End with the list of test files and the clauses each covers.`;

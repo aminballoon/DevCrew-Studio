@@ -232,6 +232,20 @@ test("QA's hidden tests are checked: a test of DevCrew's files and tests with no
   assert.equal(JSON.parse(readFileSync(join(ws, 'acceptance/why.json'), 'utf8')).length, 10);
 });
 
+test('"No dependencies" is checked by Verify: a declared package sends correct code back with the clause', { timeout: 60_000 }, async () => {
+  const runs = new RunManager();
+  const runId = runs.start({ requirement: REQUIREMENT, source: join(TASK, 'seed'), profile: 'fake-deps', autoApprove: true, pipeline: 'fast' });
+  const status = await runs.waitFor(runId);
+  const events = getBus().read(runId);
+  assert.equal(status, 'approved', JSON.stringify(events.filter(e => e.type === 'log' || e.type === 'run_finished')).slice(0, 2000));
+  const verifies = events.flatMap(e => (e.type === 'verify_result' ? [e] : []));
+  assert.deepEqual(verifies.map(v => [v.passed, v.reasons]), [[false, ['No dependencies (R-14): package.json declares lodash (dependencies)']], [true, []]]);
+  const prompts = events.flatMap(e => (e.type === 'agent_input' ? [[e.role, e.prompt] as const] : []));
+  assert.match(prompts.filter(([r]) => r === 'dev')[1][1], /- No dependencies \(R-14\): package\.json declares lodash/);
+  // QA is told not to test it; the hidden tests only judge behaviour
+  assert.match(prompts.find(([r]) => r === 'qa')![1], /Do not write a test for R-14 \("No dependencies\."\): the system checks it/);
+});
+
 test('an unattended run that cannot go on ends as failed and says why', { timeout: 60_000 }, async () => {
   // The Builder asks for an architecture change, but the fast pipeline has no Architect: a person would decide
   const runs = new RunManager();

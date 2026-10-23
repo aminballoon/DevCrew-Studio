@@ -13,7 +13,8 @@ import { addedLines, mutationScore, restorePending, runMutationCheck, type Mutan
 import { captureBaseline, countDeclaredTests, verify, type TestBaseline, type VerifyResult } from '../guard/verify';
 import { commitAll, diffSince, prepareWorkspace, type Workspace } from '../guard/workspace';
 import { readTestRun, readText, type TestRun } from './testRun';
-import { acceptanceProblems, failureContext, readReasons } from './acceptance';
+import { acceptanceProblems, failureContext, noDependenciesClause, readReasons } from './acceptance';
+import { dependencyProblems } from '../guard/dependencies';
 import { acceptanceFixPrompt, ACCEPTANCE_RUN, agentStepPrompt, filesBlock, BUILDER_TESTS, builderFixPrompt, builderPrompt, fastQaPrompt, qaDisputePrompt, qaMutantsPrompt } from './prompts';
 import { requirementClauses } from './requirement';
 import { collectReports } from './reports';
@@ -263,6 +264,12 @@ function architectureReasons(ws: string): string[] {
   }
 }
 
+/** Verify's reasons when the requirement says "no dependencies" and the project has some. */
+function dependencyReasons(ws: string, requirement: string): string[] {
+  const clause = noDependenciesClause(requirementClauses(requirement));
+  return clause ? dependencyProblems(ws).map(p => `No dependencies (${clause.id}): ${p}`) : [];
+}
+
 /** The architecture files, pasted for the Builder; none when the project has no architecture. */
 const architectureFiles = (ws: string) => (existsSync(join(ws, ARCHITECTURE_FILE)) ? pasteFiles(ws, [ARCHITECTURE_FILE, ARCHITECTURE_DOC, 'contracts/']) : []);
 
@@ -400,10 +407,11 @@ const fastVerify = node('verify', async s => {
     hideAcceptance(s);
   }
   const architecture = architectureReasons(ws);
+  const dependencies = dependencyReasons(ws, s.requirement);
   const result: VerifyResult = {
-    passed: own.passed && hidden.passed && !architecture.length,
+    passed: own.passed && hidden.passed && !architecture.length && !dependencies.length,
     tests: hidden.tests,
-    reasons: [...own.reasons.map(r => `Your tests: ${r}`), ...hidden.reasons.map(r => `Hidden tests: ${r}`), ...architecture],
+    reasons: [...own.reasons.map(r => `Your tests: ${r}`), ...hidden.reasons.map(r => `Hidden tests: ${r}`), ...architecture, ...dependencies],
     output: `--- your tests ---\n${own.output.slice(-3000)}\n\n--- hidden acceptance tests ---\n${hidden.output}`,
     // The clause and QA's reason behind each failing hidden test, so the Builder fixes the right behaviour
     context: hidden.passed ? undefined : failureContext(failingTests(hidden.output), readReasons(runDir(s.runId)), requirementClauses(s.requirement)) || undefined,
