@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
@@ -209,12 +210,39 @@ function quotaHit(events: DevcrewEvent[]): string | null {
   }
   return null;
 }
-/** A saved result that only failed for quota is run again. */
+/**
+ * Why a run stopped when this machine, not the arm, broke it: the Mac slept mid-response (suites
+ * why-1 and roadmap-why: every agent turn hung until its 60-minute limit) or the network dropped.
+ */
+const HOST = /computer went to sleep|network connection was lost|socket hang up|ECONNRESET/i;
+function hostInterrupted(events: DevcrewEvent[]): string | null {
+  // Most hung turns say nothing: macOS's power log says whether the machine slept during the run
+  const from = events.find(e => e.type === 'run_started')?.ts, to = events.at(-1)?.ts;
+  if (from && to && process.platform === 'darwin') {
+    try {
+      const log = execFileSync('pmset', ['-g', 'log'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
+      for (const line of log.split('\n')) {
+        const m = line.match(/^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d [+-]\d{4}) Sleep\s/);
+        const at = m ? Date.parse(m[1].replace(' ', 'T').replace(/ ([+-]\d\d)(\d\d)$/, '$1:$2')) : NaN;
+        if (at >= from && at <= to) { return `the machine slept at ${m![1]}`; }
+      }
+    } catch { /* no power log: rely on what the agents said */ }
+  }
+  for (const e of events) {
+    const text = e.type === 'agent_text' ? e.text : e.type === 'log' && e.level === 'error' ? e.message : '';
+    const m = text.match(HOST);
+    if (m) { return m[0]; }
+  }
+  return null;
+}
+const HOST_MAX_RETRIES = 3;
+
+/** A saved result that only failed for quota, or because this machine broke the run, is run again. */
 function savedAndValid(file: string): boolean {
   if (!existsSync(file)) { return false; }
   const r = JSON.parse(readFileSync(file, 'utf8')) as { resolved?: boolean; runId?: string; quotaLimited?: string };
   if (r.quotaLimited) { return false; }
-  return r.resolved || !r.runId || !quotaHit(getBus().read(r.runId));
+  return r.resolved || !r.runId || (!quotaHit(getBus().read(r.runId)) && !hostInterrupted(getBus().read(r.runId)));
 }
 if (values.regrade) {
   for (const { task, arm, rep } of matrix) {
@@ -239,7 +267,7 @@ const QUOTA_MAX_WAIT_MIN = Number(process.env.BENCH_QUOTA_MAX_WAIT_MIN ?? 12 * 6
 for (const [i, { task, arm, rep }] of matrix.entries()) {
   const file = join(outDir, `${task.id}__${arm.id}__r${rep}.json`);
   if (savedAndValid(file)) { console.log(`[${i + 1}/${matrix.length}] ${task.id} ${arm.id} #${rep}: already done`); continue; }
-  let waitedMin = 0;
+  let waitedMin = 0, hostRetries = 0;
   // In a handoff round the code of `arm` is changed by the handoff arm; results stay under `arm`
   // With --handoff-self each arm keeps changing its own code (does its process keep the code easy to change?)
   const runner = task.handoffArm && !values['handoff-self'] ? loadArm(task.handoffArm) : arm;
@@ -285,6 +313,13 @@ for (const [i, { task, arm, rep }] of matrix.entries()) {
       console.log(`stopped by the vendor (${quota}); waiting ${QUOTA_WAIT_MIN} min, then running it again`);
       await new Promise(r => setTimeout(r, QUOTA_WAIT_MIN * 60_000));
       waitedMin += QUOTA_WAIT_MIN;
+      continue retry;
+    }
+    // This machine slept or lost the network: the run says nothing about the arm, run it again
+    const host = quota ? null : hostInterrupted(getBus().read(runId));
+    if (host && hostRetries < HOST_MAX_RETRIES) {
+      hostRetries++;
+      console.log(`interrupted by this machine (${host}); running it again`);
       continue retry;
     }
     const workspace = workspaceOf(runId);
