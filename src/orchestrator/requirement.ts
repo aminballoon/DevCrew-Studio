@@ -34,7 +34,9 @@ export function requirementClauses(requirement: string): Clause[] {
     const body = t.replace(/^([-*+]|\d+[.)])\s+/, '');
     out.push(...splitSentences(body));
   }
-  return out.filter(c => c.replace(/[`*_]/g, '').trim().length >= MIN_CHARS).map((text, n) => ({ id: `R-${n + 1}`, text }));
+  // A short line with code in it is an example or a rule ("JPY: `¥1,235`", "`PING` → `PONG`"), not a
+  // fragment: dropped, the JPY example never reached the Builder or QA and both missed it (roadmap-self, roadmap-mut)
+  return out.filter(c => /`[^`]+`/.test(c) || c.replace(/[`*_]/g, '').trim().length >= MIN_CHARS).map((text, n) => ({ id: `R-${n + 1}`, text }));
 }
 
 /** Split on ". " when the next part starts a new sentence, never inside `code`. */

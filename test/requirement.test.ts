@@ -33,11 +33,16 @@ test('table rows and code blocks are whole clauses; table headers and tiny fragm
 pub fn decode(b: &[u8]) -> Frame;
 \`\`\`
 Ok.
+- JPY: \`¥1,235\`
+- \`PING\` → \`PONG\`
 `);
   assert.deepEqual(c.map(x => x.text), [
     '| 0 | version, must be `1` |',
     '| 1–8 | timestamp in microseconds |',
     '```rust\npub fn decode(b: &[u8]) -> Frame;\n```',
+    // Short, but examples: they are clauses
+    'JPY: `¥1,235`',
+    '`PING` → `PONG`',
   ]);
   assert.match(clauseList(c), /^R-1: \| 0 \|.*\nR-2: .*\nR-3: \n```rust/);
 });
